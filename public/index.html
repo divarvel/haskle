@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="utf8">
+    <style>
+      * {
+        box-sizing: border-box;
+      }
+      .main{
+        margin: auto;
+        max-width: 40rem;
+        width: 100%;
+        border: 1px solid black;
+        text-align: center;
+      }
+
+      nav img {
+        margin: 20px;
+      }
+
+      .main button[type="submit"],
+      .main input {
+        width: 100%;
+      }
+    </style>
+  </head>
+
+  <body>
+    <section class="main">
+      <nav>
+          <img src="./haskle.png" alt="Haskle">
+      </nav>
+      <div id="haskle"></div>
+    </section>
+    
+    <script src="./haskle.js"></script>
+    <script>
+      var app = Elm.Main.init({
+        node: document.getElementById("haskle")
+      });      
+    </script>
+  </body>
+</html>
