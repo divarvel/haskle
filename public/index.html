@@ -38,6 +38,9 @@
     
     <script src="./haskle.js"></script>
     <script>
+      if(window.location.toString().startsWith("http://haskle.net")) {
+        window.location.replace("https://haskle.net");
+      }
       var app = Elm.Main.init({
         node: document.getElementById("haskle")
       });      
