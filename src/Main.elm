@@ -33,32 +33,71 @@ type alias Function =
   , signature : Signature
   }
 
-type alias Model =
-  { answer : Maybe Function
+type alias GameState =
+  { answer : Function
   , guesses : List Function
   , knownIdents : Set String
   , input : String
+  , allFuncs : Dict String Signature
   }
+
+type Model =
+    FunctionsError
+  | Loading (Dict String Signature)
+  | Loaded GameState
+  
 
 main =
          Browser.element
            { init = init
-           , update = update
+           , update = \msg model -> (update msg model, Cmd.none)
            , view = view
            , subscriptions = \_ -> Sub.none
            }
 
 init : () -> (Model, Cmd Msg)
 init _ =
-  ( { answer = Nothing
-    , guesses = []
-    , knownIdents = Set.empty
-    , input = ""
-    }
+  ( case results of
+      Err _ -> FunctionsError
+      Ok allFuncs -> Loading allFuncs
   , Time.now
       |> Task.andThen (\now -> Task.map (\here -> (here, now)) Time.here)
       |> Task.perform SetTime
   )
+
+update : Msg -> Model -> Model
+update msg model =
+  case (model, msg) of
+    (FunctionsError, _) -> FunctionsError
+    (Loading allFuncs, SetTime (here,now)) ->
+       case getAnswer here now allFuncs of
+         Nothing -> FunctionsError
+         Just a -> Loaded { answer = a
+                          , guesses = []
+                          , knownIdents = Set.empty
+                          , input = ""
+                          , allFuncs = allFuncs
+                          }
+    (Loading allFuncs, _) -> Loading allFuncs
+    (Loaded state, SetTime _) -> Loaded state
+    (Loaded state, Input i) ->
+       Loaded { state | input = i }
+    (Loaded state, Guess) ->
+       if List.member state.input (List.map .name state.guesses)
+       then Loaded state
+       else
+         case Dict.get state.input state.allFuncs of
+           Nothing -> Loaded { state | input = "" }
+           Just signature ->
+             let
+                 newIdents = getIdents signature
+                 g = { name = state.input, signature = signature }
+              in
+                 Loaded { state |
+                     guesses = state.guesses ++ [g],
+                     knownIdents = Set.union state.knownIdents newIdents,
+                     input = ""
+                     }
 
 getAnswer : Time.Zone -> Time.Posix -> Dict String Signature -> Maybe Function
 getAnswer here now allFuncs =
@@ -131,39 +170,7 @@ display sig =
         |> List.map displayElem
         |> String.concat
 
-update : Msg -> Model -> (Model, Cmd Msg)
-update msg model =
-  let
-      new =
-        case (results, model.answer) of
-          (Err x, _) -> model
-          (Ok allFuncs, answer) ->
-            case msg of
-              SetTime (here, now) ->
-                let
-                    a = getAnswer here now allFuncs
-                 in
-                    { model | answer = a }
-              Input i ->
-                { model | input = i }
-              Guess ->
-                if List.member model.input (List.map .name model.guesses)
-                then model
-                else
-                  case Dict.get model.input allFuncs of
-                    Nothing -> { model | input = "" }
-                    Just signature ->
-                      let
-                          newIdents = getIdents signature
-                          g = { name = model.input, signature = signature }
-                       in
-                          { model |
-                              guesses = model.guesses ++ [g],
-                              knownIdents = Set.union model.knownIdents newIdents,
-                              input = ""
-                              }
-   in
-      (new, Cmd.none)
+
 
 viewGuess answer guess =
   div [] [ text guess.name
@@ -176,62 +183,64 @@ viewGuess answer guess =
 
 view : Model -> Html Msg
 view model =
+  case model of
+    FunctionsError -> div [] [text "error loading prelude functions"]
+    Loading _ -> div [] [text "loading"]
+    Loaded state -> viewGame state
+
+viewGame : GameState -> Html Msg
+viewGame state =
   let
-      garbled a = garble model.knownIdents
-                         a.signature
-      possibilities allFuncs =
-                      allFuncs
+      garbled = garble state.knownIdents
+                       state.answer.signature
+      possibilities = state.allFuncs
                         |> Dict.keys
                         |> List.map (\name -> option [A.value name] [])
                         |> datalist [A.id "function-names"]
       nameInput = form [onSubmit Guess]
-        [ input [onInput Input, A.list "function-names", A.value model.input] []
+        [ input [onInput Input, A.list "function-names", A.value state.input] []
         , br [] []
         , button [A.type_ "submit"] [text "guess"]
         ]
   in
-     case (results, model.answer) of
-       (Err x, _) -> div [] [text (toString x)]
-       (_, Nothing) -> div [] [text "loading"]
-       (Ok allFuncs, Just answer) ->
-         if List.head (List.reverse model.guesses) == model.answer
-         then
-            gameIsWon model answer
-         else
-            div []
-              [ div [] [ text (garbleName answer.name)
-                       , text " :: "
-                       , text (garbled answer)
-                       ]
-              , viewGuesses answer model.guesses
-              , possibilities allFuncs
-              , nameInput
-              ]
+     if List.head (List.reverse state.guesses) == Just state.answer
+     then
+        gameIsWon state
+     else
+        div []
+          [ div [] [ text (garbleName state.answer.name)
+                   , text " :: "
+                   , text garbled
+                   ]
+          , viewGuesses state
+          , possibilities
+          , nameInput
+          ]
 
-viewGuesses : Function -> List Function -> Html Msg
-viewGuesses answer guesses =
-  guesses
-    |> List.map (viewGuess answer)
+viewGuesses : GameState -> Html Msg
+viewGuesses state =
+  state.guesses
+    |> List.map (viewGuess state.answer)
     |> div []
 
-gameIsWon : Model -> Function -> Html Msg
-gameIsWon model answer =
+gameIsWon : GameState -> Html Msg
+gameIsWon state =
   div []
-    [ viewGuesses answer model.guesses
-    , a [A.href (twitterUrl model)] [text "Share on twitter"]
+    [ viewGuesses state
+    , a [A.href (twitterUrl state)] [text "Share on twitter"]
     ]
 
-twitterUrl : Model -> String
-twitterUrl model =
+twitterUrl : GameState -> String
+twitterUrl state =
   Url.crossOrigin
     "https://twitter.com"
     ["intent", "tweet"]
-    [Url.string "text" (twitterMessage model)]
+    [Url.string "text" (twitterMessage state)]
 
-twitterMessage : Model -> String
-twitterMessage model = String.join " "
+twitterMessage : GameState -> String
+twitterMessage state = String.join " "
   [ "I've found today's https://haskle.net function in"
-  , String.fromInt (List.length model.guesses)
+  , String.fromInt (List.length state.guesses)
   , "trie(s)!"
   ]
 
