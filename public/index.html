@@ -8,9 +8,8 @@
       }
       .main{
         margin: auto;
-        max-width: 40rem;
+        max-width: min(40rem, 100vw);
         width: 100%;
-        border: 1px solid black;
         text-align: center;
       }
 
@@ -30,7 +29,11 @@
       <nav>
           <img src="./haskle.png" alt="Haskle">
       </nav>
-      <div id="haskle"></div>
+      <main id="haskle"></main>
+      <nav>
+          By <a href="https://twitter.com/clementd">@clementd</a> -
+          <a href="https://github.com/divarvel/haskle">GitHub</a>
+      </nav>
     </section>
     
     <script src="./haskle.js"></script>
