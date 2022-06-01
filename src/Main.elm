@@ -5,7 +5,6 @@ import Url.Builder as Url
 import Random as Random
 import Task as Task
 import Time as Time
-import Debug exposing (toString, log)
 import Dict exposing (Dict)
 import Dict as Dict
 import Set as Set
@@ -127,7 +126,7 @@ getAnswer here now allFuncs =
                      |> Maybe.andThen (\k -> (Dict.get k allFuncs)
                                                |> Maybe.map (\s -> { name = k, signature = s }))
    in
-      log (toString randomKey) randomValue
+      randomValue
 
 getIdents : Signature -> Set String
 getIdents elems =
