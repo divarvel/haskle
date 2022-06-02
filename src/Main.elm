@@ -20,6 +20,7 @@ import Result.Extra exposing (combineMap)
 type Msg = Input String
          | Guess
          | SetTime (Time.Zone, Time.Posix)
+         | NextGame
 
 type TypeElem
   = Literal String
@@ -38,6 +39,8 @@ type alias GameState =
   , knownIdents : Set String
   , input : String
   , allFuncs : Dict String Signature
+  , nextSeed : Random.Seed
+  , gameNumber : Int
   }
 
 type Model =
@@ -69,14 +72,17 @@ update msg model =
   case (model, msg) of
     (FunctionsError, _) -> FunctionsError
     (Loading allFuncs, SetTime (here,now)) ->
-       case getAnswer here now allFuncs of
-         Nothing -> FunctionsError
-         Just a -> Loaded { answer = a
-                          , guesses = []
-                          , knownIdents = Set.empty
-                          , input = ""
-                          , allFuncs = allFuncs
-                          }
+       case getAnswer (seedFromDay here now) allFuncs of
+         (Nothing, _)   -> FunctionsError
+         (Just a, nextSeed) -> Loaded { answer = a
+                                      , guesses = []
+                                      , knownIdents = Set.empty
+                                      , input = ""
+                                      , allFuncs = allFuncs
+                                      , nextSeed = nextSeed
+                                      , gameNumber = 1
+                                      }
+
     (Loading allFuncs, _) -> Loading allFuncs
     (Loaded state, SetTime _) -> Loaded state
     (Loaded state, Input i) ->
@@ -97,9 +103,34 @@ update msg model =
                      knownIdents = Set.union state.knownIdents newIdents,
                      input = ""
                      }
+    (Loaded state, NextGame) ->
+       case getAnswer (state.nextSeed) state.allFuncs of
+         (Nothing, _)       -> FunctionsError
+         (Just a, nextSeed) -> Loaded { answer = a
+                                      , guesses = []
+                                      , knownIdents = Set.empty
+                                      , input = ""
+                                      , allFuncs = state.allFuncs
+                                      , nextSeed = nextSeed
+                                      , gameNumber = 1 + state.gameNumber
+                                      }
 
-getAnswer : Time.Zone -> Time.Posix -> Dict String Signature -> Maybe Function
-getAnswer here now allFuncs =
+getAnswer : Random.Seed -> Dict String Signature -> (Maybe Function, Random.Seed)
+getAnswer seed allFuncs =
+  let
+      maxIndex = Dict.size allFuncs - 1
+      (randomIndex, nextSeed) = Random.step (Random.int 0 maxIndex) seed
+      randomKey = Dict.keys allFuncs
+                     |> List.drop randomIndex
+                     |> List.head
+      randomValue = randomKey
+                     |> Maybe.andThen (\k -> (Dict.get k allFuncs)
+                                               |> Maybe.map (\s -> { name = k, signature = s }))
+   in
+      (randomValue, nextSeed)
+
+seedFromDay : Time.Zone -> Time.Posix -> Random.Seed
+seedFromDay here now =
   let
       day = Time.toDay here now
       month = case Time.toMonth here now of
@@ -117,16 +148,7 @@ getAnswer here now allFuncs =
                      Time.Dec -> 12
       year = Time.toYear here now
       seed = Random.initialSeed (day + month + year + 2)
-      maxIndex = Dict.size allFuncs - 1
-      (randomIndex, _) = Random.step (Random.int 0 maxIndex) seed
-      randomKey = Dict.keys allFuncs
-                     |> List.drop randomIndex
-                     |> List.head
-      randomValue = randomKey
-                     |> Maybe.andThen (\k -> (Dict.get k allFuncs)
-                                               |> Maybe.map (\s -> { name = k, signature = s }))
-   in
-      randomValue
+   in seed
 
 getIdents : Signature -> Set String
 getIdents elems =
@@ -227,6 +249,9 @@ gameIsWon state =
   div []
     [ viewGuesses state
     , a [A.href (twitterUrl state)] [text "Share on twitter"]
+    , div []
+        [ button [onClick NextGame] [text "Try another one"]
+        ]
     ]
 
 twitterUrl : GameState -> String
@@ -238,7 +263,9 @@ twitterUrl state =
 
 twitterMessage : GameState -> String
 twitterMessage state = String.join " "
-  [ "I've found today's https://haskle.net function in"
+  [ "I've found today's https://haskle.net "
+  , "#" ++ String.fromInt state.gameNumber
+  , "function in"
   , String.fromInt (List.length state.guesses)
   , "trie(s)!"
   ]
