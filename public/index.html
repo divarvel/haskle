@@ -2,35 +2,139 @@
 <html>
   <head>
     <meta charset="utf8">
+    <meta name="viewport" content="width=device-width, minimum-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+
     <style>
       * {
         box-sizing: border-box;
       }
-      .main{
-        margin: auto;
-        max-width: min(40rem, 100vw);
-        width: 100%;
-        text-align: center;
+      body {
+        margin: 0;
+        padding: 0;
+        font-family: sans-serif;
       }
 
-      nav img {
-        margin: 20px;
+      .main{
+        margin: auto;
+        max-width: 32rem;
+        min-height: 100vh;
+        width: 100%;
+        text-align: center;
+        font-size: 2rem;
+        display: flex;
+        flex-direction: column;
+        padding-left: 0.5rem;
+        padding-right: 0.5rem;
+      }
+
+      .header img {
+        margin-top: 10px;
+        margin-bottom: 10px;
+        height: 50px;
+      }
+
+      .header {
+        margin-bottom: 1rem;
+      }
+
+      .answer {
+        margin-bottom: 1rem;
+        font-size: 1.5rem;
+      }
+
+      .guesses {
+        font-size: 1rem;
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .guesses .guess,
+      .guesses .empty {
+        font-family: monospace;
+        font-size: 0.8rem
+        height: 1.5rem;
+        line-height: 1.5rem;
+        background-color: #eee;
+      }
+
+      .guesses .guess {
+        display: flex;
+        flex-direction: row;
+      }
+
+      .guesses .guess .function {
+        text-align: center;
+        flex-grow: 1;
+      }
+
+      .guesses .guess .result {
+        flex-grow: 0;
+        margin-right: 0.5em;
+        width: 1em;
+      }
+
+      .guesses .empty {
+        background-color: #ddd;
+      }
+
+      form {
+        margin-top: auto;
       }
 
       .main button[type="submit"],
       .main input {
         width: 100%;
+        height: 2rem;
+        line-height: 2rem;
+        background-color: white;
+        border: 1px solid #ddd;
+      }
+
+      .game-number {
+         font-size: 0.6rem;
+         height: 1rem;
+      }
+
+      .share-link {
+        margin-top: 5px;
+        display: block;
+        height: 2rem;
+        line-height: 2rem;
+        text-decoration: none;
+        font-size: 1.5rem;
+        color: #333;
+        background-color: #eee;
+      }
+
+      .next-game button {
+        border: 0;
+        width: 100%;
+        margin-top: 5px;
+        display: block;
+        height: 2rem;
+        line-height: 2rem;
+        text-decoration: none;
+        font-size: 1.5rem;
+        color: #333;
+        background-color: #eee;
+      }
+
+      .footer {
+        margin-top: auto;
+        font-size: 1rem;
+        padding: 1rem;
       }
     </style>
   </head>
 
   <body>
     <section class="main">
-      <nav>
+      <nav class="header">
           <img src="./haskle.png" alt="Haskle">
       </nav>
       <main id="haskle"></main>
-      <nav>
+      <nav class="footer">
           By <a href="https://twitter.com/clementd">@clementd</a> -
           <a href="https://github.com/divarvel/haskle">GitHub</a>
       </nav>

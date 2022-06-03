@@ -318,13 +318,18 @@ display sig =
 
 
 viewGuess answer guess =
-  div [] [ text guess.name
-         , text " :: "
-         , text (display guess.signature)
-         , text (if guess.name == answer.name
-                 then "🎉"
-                 else "❌")
-         ]
+  div [A.class "guess"]
+    [ div [A.class "function"]
+          [ text guess.name
+          , text " :: "
+          , text (display guess.signature)
+          ]
+    , div [A.class "result"]
+          [ text (if guess.name == answer.name
+                  then "🎉"
+                  else "❌")
+          ]
+    ]
 
 view : Model -> Html Msg
 view model =
@@ -345,6 +350,8 @@ viewGame state =
         [ input [onInput Input, A.list "function-names", A.value state.input] []
         , br [] []
         , button [A.type_ "submit"] [text "guess"]
+        , br [] []
+        , span [A.class "game-number"] [ text ("Game #" ++ String.fromInt state.gameNumber)]
         ]
   in
      if List.head (List.reverse state.guesses) == Just state.answer
@@ -352,10 +359,11 @@ viewGame state =
         gameIsWon state
      else
         div []
-          [ div [] [ text (garbleName state.answer.name)
-                   , text " :: "
-                   , text garbled
-                   ]
+          [ div [A.class "answer"]
+                [ text (garbleName state.answer.name)
+                , text " :: "
+                , text garbled
+                ]
           , viewGuesses state
           , possibilities
           , nameInput
@@ -365,14 +373,20 @@ viewGuesses : GameState -> Html Msg
 viewGuesses state =
   state.guesses
     |> List.map (viewGuess state.answer)
-    |> div []
+    |> div [A.class "guesses"]
 
 gameIsWon : GameState -> Html Msg
 gameIsWon state =
   div []
-    [ viewGuesses state
-    , a [A.href (twitterUrl state)] [text "Share on twitter"]
-    , div []
+    [ div [A.class "answer"]
+          [ text state.answer.name
+          , text " :: "
+          , text (display state.answer.signature)
+          ]
+    , viewGuesses state
+    , a [A.href (twitterUrl state), A.class "share-link"]
+        [text "Share on twitter"]
+    , div [A.class "next-game"]
         [ button [onClick NextGame] [text "Try another one"]
         ]
     ]
