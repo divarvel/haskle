@@ -1,4 +1,4 @@
-module Main exposing (main)
+port module Main exposing (..)
 
 import Url as Url
 import Url.Builder as Url
@@ -10,16 +10,31 @@ import Dict as Dict
 import Set as Set
 import Set exposing (Set)
 import Browser
-import Html exposing (Html, button, div, text, datalist, option, input, form, br, a)
+import Html exposing (Html, button, div, text, datalist, option, input, form, br, a, span)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Html.Attributes as A
 import Parser exposing (..)
 import Parser as Parser
 import Result.Extra exposing (combineMap)
+import Json.Decode as Decode
+import Json.Encode as Encode
+
+port persistState : Encode.Value -> Cmd msg
+
+type alias InitFlags =
+  { initialSeed : Int
+  , initialState : Maybe PersistedState
+  }
+
+type alias PersistedState =
+  { guesses : List Function
+  , knownIdents : List String
+  , initialSeed : Int
+  , gameNumber : Int
+  }
 
 type Msg = Input String
          | Guess
-         | SetTime (Time.Zone, Time.Posix)
          | NextGame
 
 type TypeElem
@@ -39,81 +54,173 @@ type alias GameState =
   , knownIdents : Set String
   , input : String
   , allFuncs : Dict String Signature
+  , initialSeed : Int
   , nextSeed : Random.Seed
   , gameNumber : Int
   }
 
 type Model =
     FunctionsError
-  | Loading (Dict String Signature)
   | Loaded GameState
   
 
 main =
          Browser.element
            { init = init
-           , update = \msg model -> (update msg model, Cmd.none)
+           , update = update
            , view = view
            , subscriptions = \_ -> Sub.none
            }
 
-init : () -> (Model, Cmd Msg)
-init _ =
-  ( case results of
-      Err _ -> FunctionsError
-      Ok allFuncs -> Loading allFuncs
-  , Time.now
-      |> Task.andThen (\now -> Task.map (\here -> (here, now)) Time.here)
-      |> Task.perform SetTime
-  )
+init : Encode.Value -> (Model, Cmd Msg)
+init initFlags =
+  case Decode.decodeValue flagsDecoder initFlags of
+    Err e -> (FunctionsError, Cmd.none)
+    Ok ({initialSeed, initialState}) ->
+        ( case results of
+            Err _ -> FunctionsError
+            Ok allFuncs -> computeState allFuncs initialSeed initialState
+        , Cmd.none
+        )
 
-update : Msg -> Model -> Model
+flagsDecoder : Decode.Decoder InitFlags
+flagsDecoder =
+  Decode.map2 InitFlags
+    (Decode.field "initialSeed" Decode.int)
+    (Decode.maybe (Decode.field "initialState" (persistedStateDecoder)))
+
+persistedStateDecoder : Decode.Decoder PersistedState
+persistedStateDecoder =
+  Decode.map4 PersistedState
+    (Decode.field "guesses" (Decode.list functionDecoder))
+    (Decode.field "knownIdents" (Decode.list Decode.string))
+    (Decode.field "initialSeed" Decode.int)
+    (Decode.field "gameNumber" Decode.int)
+
+persistedStateEncoder { guesses, knownIdents, initialSeed, gameNumber } =
+  Encode.object [ ("guesses", Encode.list functionEncoder guesses)
+                , ("knownIdents", Encode.list Encode.string knownIdents)
+                , ("initialSeed", Encode.int initialSeed)
+                , ("gameNumber", Encode.int gameNumber)
+                ]
+
+functionDecoder : Decode.Decoder Function
+functionDecoder =
+  Decode.map2 Function
+    (Decode.field "name" Decode.string)
+    (Decode.field "signature" (Decode.list typeElemDecoder))
+
+functionEncoder {name, signature} =
+  Encode.object [ ("name", Encode.string name)
+                , ("signature", Encode.list typeElemEncoder signature)
+                ]
+
+typeElemDecoder : Decode.Decoder TypeElem
+typeElemDecoder =
+  let
+      raw = Decode.map2 (\kind value -> (kind, value))
+              (Decode.field "kind" Decode.string)
+              (Decode.field "value" Decode.string)
+   in
+      raw |> Decode.andThen (\(kind, value) ->
+        case kind of
+          "lit"   -> Decode.succeed (Literal value)
+          "ident" -> Decode.succeed (Ident value)
+          _       -> Decode.fail ("Unknown kind " ++ kind ++ " not in (lit,ident)")
+      )
+
+typeElemEncoder elem =
+  case elem of
+    Literal value -> Encode.object [ ("kind", Encode.string "lit")
+                                   , ("value", Encode.string value)
+                                   ]
+    Ident value -> Encode.object [ ("kind", Encode.string "ident")
+                                 , ("value", Encode.string value)
+                                 ]
+
+computeState : Dict String Signature -> Int -> Maybe PersistedState
+            -> Model
+computeState allFuncs initialSeed mState =
+  let
+      fromScratch =
+        case getAnswer (Random.initialSeed initialSeed) allFuncs of
+          (Nothing, _)   -> FunctionsError
+          (Just a, nextSeed) -> Loaded { answer = a
+                                       , guesses = []
+                                       , knownIdents = Set.empty
+                                       , input = ""
+                                       , allFuncs = allFuncs
+                                       , initialSeed = initialSeed
+                                       , nextSeed = nextSeed
+                                       , gameNumber = 1
+                                       }
+   in
+      case mState of
+        Nothing -> fromScratch
+        Just persisted ->
+          if initialSeed /= persisted.initialSeed
+          then fromScratch
+          else
+            case getNthAnswer (Random.initialSeed initialSeed) allFuncs persisted.gameNumber of
+              (Nothing, _) -> FunctionsError
+              (Just a, nextSeed) ->
+                Loaded { answer = a
+                       , guesses = persisted.guesses
+                       , knownIdents = Set.fromList persisted.knownIdents
+                       , input = ""
+                       , allFuncs = allFuncs
+                       , initialSeed = initialSeed
+                       , nextSeed = nextSeed
+                       , gameNumber = persisted.gameNumber
+                       }
+
+update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case (model, msg) of
-    (FunctionsError, _) -> FunctionsError
-    (Loading allFuncs, SetTime (here,now)) ->
-       case getAnswer (seedFromDay here now) allFuncs of
-         (Nothing, _)   -> FunctionsError
-         (Just a, nextSeed) -> Loaded { answer = a
-                                      , guesses = []
-                                      , knownIdents = Set.empty
-                                      , input = ""
-                                      , allFuncs = allFuncs
-                                      , nextSeed = nextSeed
-                                      , gameNumber = 1
-                                      }
-
-    (Loading allFuncs, _) -> Loading allFuncs
-    (Loaded state, SetTime _) -> Loaded state
+    (FunctionsError, _) -> (FunctionsError, Cmd.none)
     (Loaded state, Input i) ->
-       Loaded { state | input = i }
+       (Loaded { state | input = i }, Cmd.none)
     (Loaded state, Guess) ->
        if List.member state.input (List.map .name state.guesses)
-       then Loaded state
+       then (Loaded state, Cmd.none)
        else
          case Dict.get state.input state.allFuncs of
-           Nothing -> Loaded { state | input = "" }
+           Nothing -> (Loaded { state | input = "" }, Cmd.none)
            Just signature ->
              let
                  newIdents = getIdents signature
                  g = { name = state.input, signature = signature }
               in
-                 Loaded { state |
-                     guesses = state.guesses ++ [g],
-                     knownIdents = Set.union state.knownIdents newIdents,
-                     input = ""
-                     }
+                 persist { state |
+                           guesses = state.guesses ++ [g],
+                           knownIdents = Set.union state.knownIdents newIdents,
+                           input = ""
+                           }
     (Loaded state, NextGame) ->
        case getAnswer (state.nextSeed) state.allFuncs of
-         (Nothing, _)       -> FunctionsError
-         (Just a, nextSeed) -> Loaded { answer = a
-                                      , guesses = []
-                                      , knownIdents = Set.empty
-                                      , input = ""
-                                      , allFuncs = state.allFuncs
-                                      , nextSeed = nextSeed
-                                      , gameNumber = 1 + state.gameNumber
-                                      }
+         (Nothing, _)       -> (FunctionsError, Cmd.none)
+         (Just a, nextSeed) -> persist { answer = a
+                                       , guesses = []
+                                       , knownIdents = Set.empty
+                                       , input = ""
+                                       , allFuncs = state.allFuncs
+                                       , initialSeed = state.initialSeed
+                                       , nextSeed = nextSeed
+                                       , gameNumber = 1 + state.gameNumber
+                                       }
+
+persist : GameState -> (Model, Cmd Msg)
+persist state =
+  let
+      { guesses, knownIdents, initialSeed, gameNumber } = state
+      toPersist = persistedStateEncoder
+                    { guesses = guesses
+                    , knownIdents = Set.toList knownIdents
+                    , initialSeed = initialSeed
+                    , gameNumber = gameNumber
+                    }
+   in
+      (Loaded state, persistState toPersist)
 
 getAnswer : Random.Seed -> Dict String Signature -> (Maybe Function, Random.Seed)
 getAnswer seed allFuncs =
@@ -128,6 +235,23 @@ getAnswer seed allFuncs =
                                                |> Maybe.map (\s -> { name = k, signature = s }))
    in
       (randomValue, nextSeed)
+
+getNthAnswer : Random.Seed -> Dict String Signature -> Int -> (Maybe Function, Random.Seed)
+getNthAnswer seed allFuncs gameNumber =
+  let
+      go currentSeed currentGame =
+           if currentGame < 1
+           then (Nothing, currentSeed)
+           else if currentGame == 1
+           then getAnswer currentSeed allFuncs
+           else
+             let
+                 maxIndex = Dict.size allFuncs - 1
+                 (_, nextSeed) = Random.step (Random.int 0 maxIndex) currentSeed
+              in
+                 go nextSeed (currentGame - 1)
+   in
+      go seed gameNumber
 
 seedFromDay : Time.Zone -> Time.Posix -> Random.Seed
 seedFromDay here now =
@@ -206,7 +330,6 @@ view : Model -> Html Msg
 view model =
   case model of
     FunctionsError -> div [] [text "error loading prelude functions"]
-    Loading _ -> div [] [text "loading"]
     Loaded state -> viewGame state
 
 viewGame : GameState -> Html Msg

@@ -41,9 +41,26 @@
       if(window.location.toString().startsWith("http://haskle.net")) {
         window.location.replace("https://haskle.net");
       }
-      var app = Elm.Main.init({
-        node: document.getElementById("haskle")
-      });      
+
+      const now = new Date();
+      const day = now.getDate();
+      const month = now.getMonth() + 1;
+      const year = now.getFullYear();
+      const initialSeed = day + month + year + 2;
+
+      const initialState = JSON.parse(localStorage.getItem("haskle"));
+
+      const app = Elm.Main.init({
+        node: document.getElementById("haskle"),
+        flags: {
+          initialSeed,
+          initialState
+        }
+      });
+
+      app.ports.persistState.subscribe((state) => {
+        localStorage.setItem("haskle", JSON.stringify(state));
+      });
     </script>
   </body>
 </html>
