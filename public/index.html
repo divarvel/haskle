@@ -125,6 +125,12 @@
         font-size: 1rem;
         padding: 1rem;
       }
+
+      .clear-storage {
+        border: 0;
+        background: none;
+        color: rgb(0,0,238);
+      }
     </style>
   </head>
 
@@ -136,7 +142,8 @@
       <main id="haskle"></main>
       <nav class="footer">
           By <a href="https://twitter.com/clementd">@clementd</a> -
-          <a href="https://github.com/divarvel/haskle">GitHub</a>
+          <a href="https://github.com/divarvel/haskle">GitHub</a> -
+          <button id="clear" class="clear-storage">Clear history</button
       </nav>
     </section>
     
@@ -165,6 +172,12 @@
       app.ports.persistState.subscribe((state) => {
         localStorage.setItem("haskle", JSON.stringify(state));
       });
+
+      document.getElementById("clear").onclick = () => {
+        localStorage.clear();
+        document.location.reload();
+      }
+
     </script>
   </body>
 </html>
