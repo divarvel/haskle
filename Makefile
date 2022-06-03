@@ -1,3 +1,6 @@
+build-dev: src/Main.elm
+	elm make src/Main.elm --output public/haskle.js
+	
 build: src/Main.elm
 	elm make --optimize src/Main.elm --output public/haskle.js
 
