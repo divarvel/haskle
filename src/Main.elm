@@ -320,9 +320,9 @@ display sig =
 viewGuess answer guess =
   div [A.class "guess"]
     [ div [A.class "function"]
-          [ text guess.name
-          , text " :: "
-          , text (display guess.signature)
+          [ span [] [text (guess.name ++ " ")]
+          , span [] [text " :: "]
+          , span [] [text (display guess.signature ++ " ")]
           ]
     , div [A.class "result"]
           [ text (if guess.name == answer.name
@@ -366,9 +366,9 @@ viewGame state =
      else
         div []
           [ div [A.class "answer"]
-                [ text (garbleName state.answer.name)
-                , text " :: "
-                , text garbled
+                [ span [] [text (garbleName state.answer.name ++ " ")]
+                , span [] [text " :: "]
+                , span [] [text garbled]
                 ]
           , viewGuesses state
           , possibilities
@@ -389,9 +389,9 @@ gameIsWon : GameState -> Html Msg
 gameIsWon state =
   div []
     [ div [A.class "answer"]
-          [ text state.answer.name
-          , text " :: "
-          , text (display state.answer.signature)
+          [ span [] [text (state.answer.name ++ " ")]
+          , span [] [text " :: "]
+          , span [] [text (display state.answer.signature ++ " ")]
           ]
     , viewGuesses state
     , a [A.href (twitterUrl state), A.class "share-link"]
@@ -405,9 +405,9 @@ gameIsLost : GameState -> Html Msg
 gameIsLost state =
   div []
     [ div [A.class "answer"]
-          [ text state.answer.name
-          , text " :: "
-          , text (display state.answer.signature)
+          [ span [] [text (state.answer.name ++ " ")]
+          , span [] [text " :: "]
+          , span [] [text (display state.answer.signature ++ " ")]
           ]
     , viewGuesses state
     , div [A.class "next-game"]

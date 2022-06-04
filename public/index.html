@@ -67,6 +67,11 @@
       .answer {
         margin-bottom: 1rem;
         font-size: 1.5rem;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1em;
       }
 
       .guesses {
@@ -80,7 +85,7 @@
       .guesses .empty {
         font-family: monospace;
         font-size: 0.8rem;
-        height: 1.5rem;
+        min-height: 1.5rem;
         line-height: 1.5rem;
         background-color: #eee;
       }
@@ -93,6 +98,11 @@
       .guesses .guess .function {
         text-align: center;
         flex-grow: 1;
+        display: flex;
+        flex-direction: row;
+        flex-wrap: wrap;
+        justify-content: center;
+        column-gap: 1em;
       }
 
       .guesses .guess .result {
