@@ -360,6 +360,9 @@ viewGame state =
      if List.head (List.reverse state.guesses) == Just state.answer
      then
         gameIsWon state
+     else if List.length state.guesses >= 10
+     then
+        gameIsLost state
      else
         div []
           [ div [A.class "answer"]
@@ -374,9 +377,13 @@ viewGame state =
 
 viewGuesses : GameState -> Html Msg
 viewGuesses state =
-  state.guesses
-    |> List.map (viewGuess state.answer)
-    |> div [A.class "guesses"]
+  let
+      empty = List.repeat 10 (div [A.class "empty"] [])
+      guesses = state.guesses
+                  |>List.map (viewGuess state.answer)
+   in
+      List.take 10 (guesses ++ empty)
+        |> div [A.class "guesses"]
 
 gameIsWon : GameState -> Html Msg
 gameIsWon state =
@@ -389,6 +396,20 @@ gameIsWon state =
     , viewGuesses state
     , a [A.href (twitterUrl state), A.class "share-link"]
         [text "Share on twitter"]
+    , div [A.class "next-game"]
+        [ button [onClick NextGame] [text "Try another one"]
+        ]
+    ]
+
+gameIsLost : GameState -> Html Msg
+gameIsLost state =
+  div []
+    [ div [A.class "answer"]
+          [ text state.answer.name
+          , text " :: "
+          , text (display state.answer.signature)
+          ]
+    , viewGuesses state
     , div [A.class "next-game"]
         [ button [onClick NextGame] [text "Try another one"]
         ]
