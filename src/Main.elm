@@ -347,7 +347,10 @@ viewGame state =
                         |> List.map (\name -> option [A.value name] [])
                         |> datalist [A.id "function-names"]
       nameInput = form [onSubmit Guess]
-        [ input [onInput Input, A.list "function-names", A.value state.input] []
+        [ input [ onInput Input, A.list "function-names"
+                , A.value state.input
+                , A.placeholder "a function from Prelude"
+                ] []
         , br [] []
         , button [A.type_ "submit"] [text "guess"]
         , br [] []

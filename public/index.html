@@ -41,6 +41,29 @@
         margin-bottom: 1rem;
       }
 
+      .doc-modal {
+        display: none;
+        font-size: 1rem;
+        text-align: left;
+      }
+
+      .doc-modal button {
+        width: 100%;
+        height: 2rem;
+        line-height: 2rem;
+        background-color: white;
+        border: 1px solid #ddd;
+        cursor: pointer;
+      }
+
+      .show-help .doc-modal {
+        display: block;
+      }
+
+      .show-help .game {
+        display: none;
+      }
+
       .answer {
         margin-bottom: 1rem;
         font-size: 1.5rem;
@@ -130,7 +153,7 @@
         padding: 1rem;
       }
 
-      .clear-storage {
+      .footer button {
         border: 0;
         background: none;
         color: rgb(0,0,238);
@@ -143,14 +166,40 @@
       <nav class="header">
           <img src="./haskle.png" alt="Haskle">
       </nav>
-      <main id="haskle"></main>
+      <section class="doc-modal">
+        <p>
+        The goal is to guess a function from prelude, from its obfuscated type.
+        Each type element (constraints, type variables, types) is initially replaced with the 🤷
+        emoji. You can reveal them by selecting a function name in the input. All the type elements
+        that are in common with the mystery signature are revealed.
+        </p>
+
+        <p>
+        The signatures are almost taken verbatim from <code>ghcid</code>, with the following differences:
+        </p>
+        <ul>
+            <li>Brackets (<code>[]</code>) are replaced with <code>List</code>;</li>
+            <li>The unit type (<code>()</code>) are replaced with <code>Unit</code>;</li>
+            <li>Typeclasses method have their typeclass in a separated constraint group.
+            For instance, <code>traverse</code> has <code>Traversable t => Applicative f => (a -> f b) -> t a -> f (t b)</code> instead of <code>(Traversable t, Applicative f) => …</code></li>
+        </ul>
+        <p>
+        Each character in the function name is replaced with a ❓ emoji.
+        </p>
+        <p class="close-block">
+            <button id="close-help">Close help</button>
+        </p>
+      </section>
+      <section class="game">
+        <main id="haskle"></main>
+      </section>
       <nav class="footer">
           By <a href="https://twitter.com/clementd">@clementd</a> -
           <a href="https://github.com/divarvel/haskle">GitHub</a> -
-          <button id="clear" class="clear-storage">Clear history</button
+          <button id="clear" class="clear-storage">Clear history</button> -
+          <button id="show-help" class="show-help">Show help</button>
       </nav>
     </section>
-    
     <script src="./haskle.js"></script>
     <script>
       if(window.location.toString().startsWith("http://haskle.net")) {
@@ -180,7 +229,15 @@
       document.getElementById("clear").onclick = () => {
         localStorage.clear();
         document.location.reload();
-      }
+      };
+
+      document.getElementById("show-help").onclick = () => {
+        document.body.classList.add("show-help");
+      };
+
+      document.getElementById("close-help").onclick = () => {
+        document.body.classList.remove("show-help");
+      };
 
     </script>
   </body>
