@@ -95,9 +95,8 @@ persistedStateDecoder =
     (Decode.field "initialSeed" Decode.int)
     (Decode.field "gameNumber" Decode.int)
 
-persistedStateEncoder { guesses, knownIdents, initialSeed, gameNumber } =
+persistedStateEncoder { guesses, initialSeed, gameNumber } =
   Encode.object [ ("guesses", Encode.list functionEncoder guesses)
-                , ("knownIdents", Encode.list Encode.string knownIdents)
                 , ("initialSeed", Encode.int initialSeed)
                 , ("gameNumber", Encode.int gameNumber)
                 ]
@@ -219,7 +218,6 @@ persist state =
       { guesses, knownIdents, initialSeed, gameNumber } = state
       toPersist = persistedStateEncoder
                     { guesses = guesses
-                    , knownIdents = Set.toList knownIdents
                     , initialSeed = initialSeed
                     , gameNumber = gameNumber
                     }
