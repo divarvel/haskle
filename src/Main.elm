@@ -51,6 +51,7 @@ type alias GameState =
   { answer : Function
   , guesses : List Function
   , knownIdents : Set String
+  , knownChars : Set Char
   , input : String
   , allFuncs : Dict String Signature
   , initialSeed : Int
@@ -145,6 +146,7 @@ computeState allFuncs initialSeed mState =
           (Just a, nextSeed) -> Loaded { answer = a
                                        , guesses = []
                                        , knownIdents = Set.empty
+                                       , knownChars = Set.empty
                                        , input = ""
                                        , allFuncs = allFuncs
                                        , initialSeed = initialSeed
@@ -161,21 +163,39 @@ computeState allFuncs initialSeed mState =
             case getNthAnswer (Random.initialSeed initialSeed) allFuncs persisted.gameNumber of
               (Nothing, _) -> FunctionsError
               (Just a, nextSeed) ->
-                Loaded { answer = a
-                       , guesses = persisted.guesses
-                       , knownIdents = computeKnownIdents allFuncs persisted.guesses
-                       , input = ""
-                       , allFuncs = allFuncs
-                       , initialSeed = initialSeed
-                       , nextSeed = nextSeed
-                       , gameNumber = persisted.gameNumber
-                       }
+                let
+                    (knownIdents, knownChars) = computeKnownIdentsFromScratch a persisted.guesses
+                 in
+                    Loaded { answer = a
+                           , guesses = persisted.guesses
+                           , knownIdents = knownIdents
+                           , knownChars = knownChars
+                           , input = ""
+                           , allFuncs = allFuncs
+                           , initialSeed = initialSeed
+                           , nextSeed = nextSeed
+                           , gameNumber = persisted.gameNumber
+                           }
 
-computeKnownIdents : Dict String Signature -> List Function -> Set String
-computeKnownIdents _ guesses =
+computeKnownIdentsFromScratch : Function -> List Function -> (Set String, Set Char)
+computeKnownIdentsFromScratch answer guesses =
   guesses
-    |> List.map (getIdents << .signature)
-    |> List.foldl Set.union Set.empty
+    |> List.foldl (computeKnownIdents answer) (Set.empty, Set.empty)
+
+computeKnownIdents : Function -> Function -> (Set String, Set Char) -> (Set String, Set Char)
+computeKnownIdents answer guess (knownIdents, knownChars) =
+  let
+      newIdents = Set.union knownIdents (getIdents guess.signature)
+      remainingIdents = Set.diff (getIdents answer.signature) newIdents
+      newChars = if not (Set.isEmpty remainingIdents)
+                 then Set.empty -- the type is not fully dicovered yet
+                 else
+                   let
+                       guessChars = Set.fromList (String.toList guess.name)
+                    in
+                       Set.union knownChars guessChars
+   in
+      (newIdents, newChars)
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
@@ -191,12 +211,14 @@ update msg model =
            Nothing -> (Loaded { state | input = "" }, Cmd.none)
            Just signature ->
              let
-                 newIdents = getIdents signature
                  g = { name = state.input, signature = signature }
+                 (newIdents, newChars) = computeKnownIdents state.answer g (state.knownIdents
+                                                                        ,state.knownChars)
               in
                  persist { state |
                            guesses = state.guesses ++ [g],
-                           knownIdents = Set.union state.knownIdents newIdents,
+                           knownIdents = newIdents,
+                           knownChars = newChars,
                            input = ""
                            }
     (Loaded state, NextGame) ->
@@ -205,6 +227,7 @@ update msg model =
          (Just a, nextSeed) -> persist { answer = a
                                        , guesses = []
                                        , knownIdents = Set.empty
+                                       , knownChars = Set.empty
                                        , input = ""
                                        , allFuncs = state.allFuncs
                                        , initialSeed = state.initialSeed
@@ -287,8 +310,17 @@ getIdents elems =
         |> List.filterMap keepIdent
         |> Set.fromList
 
-garbleName : String -> String
-garbleName original = String.repeat (String.length original) "❓"
+garbleName : Set Char -> String -> String
+garbleName knownChars original =
+  let
+      garbleChar c = if Set.member c knownChars
+                     then c
+                     else '❓'
+   in
+      original
+        |> String.toList
+        |> List.map garbleChar
+        |> String.fromList
 
 garble : Set String -> Signature -> String
 garble knownIdents sig =
@@ -344,6 +376,8 @@ viewGame state =
   let
       garbled = garble state.knownIdents
                        state.answer.signature
+      garbledName = garbleName state.knownChars
+                               state.answer.name
       possibilities = state.allFuncs
                         |> Dict.keys
                         |> List.map (\name -> option [A.value name] [])
@@ -368,7 +402,7 @@ viewGame state =
      else
         div []
           [ div [A.class "answer"]
-                [ span [] [text (garbleName state.answer.name ++ " ")]
+                [ span [] [text (garbledName ++ " ")]
                 , span [] [text " :: "]
                 , span [] [text garbled]
                 ]
