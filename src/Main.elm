@@ -28,7 +28,6 @@ type alias InitFlags =
 
 type alias PersistedState =
   { guesses : List Function
-  , knownIdents : List String
   , initialSeed : Int
   , gameNumber : Int
   }
@@ -91,9 +90,8 @@ flagsDecoder =
 
 persistedStateDecoder : Decode.Decoder PersistedState
 persistedStateDecoder =
-  Decode.map4 PersistedState
+  Decode.map3 PersistedState
     (Decode.field "guesses" (Decode.list functionDecoder))
-    (Decode.field "knownIdents" (Decode.list Decode.string))
     (Decode.field "initialSeed" Decode.int)
     (Decode.field "gameNumber" Decode.int)
 
@@ -166,13 +164,19 @@ computeState allFuncs initialSeed mState =
               (Just a, nextSeed) ->
                 Loaded { answer = a
                        , guesses = persisted.guesses
-                       , knownIdents = Set.fromList persisted.knownIdents
+                       , knownIdents = computeKnownIdents allFuncs persisted.guesses
                        , input = ""
                        , allFuncs = allFuncs
                        , initialSeed = initialSeed
                        , nextSeed = nextSeed
                        , gameNumber = persisted.gameNumber
                        }
+
+computeKnownIdents : Dict String Signature -> List Function -> Set String
+computeKnownIdents _ guesses =
+  guesses
+    |> List.map (getIdents << .signature)
+    |> List.foldl Set.union Set.empty
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
