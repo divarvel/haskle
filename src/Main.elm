@@ -57,6 +57,7 @@ type alias GameState =
   , initialSeed : Int
   , nextSeed : Random.Seed
   , gameNumber : Int
+  , error : Maybe String
   }
 
 type Model =
@@ -152,6 +153,7 @@ computeState allFuncs initialSeed mState =
                                        , initialSeed = initialSeed
                                        , nextSeed = nextSeed
                                        , gameNumber = 1
+                                       , error = Nothing
                                        }
    in
       case mState of
@@ -175,6 +177,7 @@ computeState allFuncs initialSeed mState =
                            , initialSeed = initialSeed
                            , nextSeed = nextSeed
                            , gameNumber = persisted.gameNumber
+                           , error = Nothing
                            }
 
 computeKnownIdentsFromScratch : Function -> List Function -> (Set String, Set Char)
@@ -202,13 +205,15 @@ update msg model =
   case (model, msg) of
     (FunctionsError, _) -> (FunctionsError, Cmd.none)
     (Loaded state, Input i) ->
-       (Loaded { state | input = i }, Cmd.none)
+       (Loaded { state | input = i, error = Nothing }, Cmd.none)
     (Loaded state, Guess) ->
        if List.member state.input (List.map .name state.guesses)
-       then (Loaded state, Cmd.none)
+       then (Loaded { state | error = Just "This function has been tried already"
+                            }, Cmd.none)
        else
          case Dict.get state.input state.allFuncs of
-           Nothing -> (Loaded { state | input = "" }, Cmd.none)
+           Nothing -> (Loaded { state | error = Just "This function is not part of the prelude"
+                                      }, Cmd.none)
            Just signature ->
              let
                  g = { name = state.input, signature = signature }
@@ -233,6 +238,7 @@ update msg model =
                                        , initialSeed = state.initialSeed
                                        , nextSeed = nextSeed
                                        , gameNumber = 1 + state.gameNumber
+                                       , error = Nothing
                                        }
 
 persist : GameState -> (Model, Cmd Msg)
@@ -382,13 +388,22 @@ viewGame state =
                         |> Dict.keys
                         |> List.map (\name -> option [A.value name] [])
                         |> datalist [A.id "function-names"]
+      hasError = case state.error of
+                   Just _ -> True
+                   Nothing -> False
+      errorClass = if hasError
+                   then "error display"
+                   else "error"
       nameInput = form [onSubmit Guess]
-        [ input [ onInput Input, A.list "function-names"
+        [ span [A.class errorClass] [text (Maybe.withDefault "" state.error)]
+        , input [ onInput Input, A.list "function-names"
                 , A.value state.input
                 , A.placeholder "a function from Prelude"
                 ] []
         , br [] []
-        , button [A.type_ "submit"] [text "guess"]
+        , button [ A.type_ "submit"
+                 , A.disabled hasError
+                 ] [text "guess"]
         , br [] []
         , span [A.class "game-number"] [ text ("Game #" ++ String.fromInt state.gameNumber)]
         ]
