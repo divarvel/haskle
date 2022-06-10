@@ -189,7 +189,7 @@ computeKnownIdents : Function -> Function -> (Set String, Set Char) -> (Set Stri
 computeKnownIdents answer guess (knownIdents, knownChars) =
   let
       newIdents = Set.union knownIdents (getIdents guess.signature)
-      remainingIdents = Set.diff (getIdents answer.signature) newIdents
+      remainingIdents = Set.diff (getIdents answer.signature) knownIdents
       newChars = if not (Set.isEmpty remainingIdents)
                  then Set.empty -- the type is not fully dicovered yet
                  else
