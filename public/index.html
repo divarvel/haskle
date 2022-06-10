@@ -211,6 +211,7 @@
         </p>
         <ul>
             <li>Brackets (<code>[]</code>) are replaced with <code>List</code>;</li>
+            <li>Tuples (<code>(,)</code> and <code>(,,)</code>) are replaced with <code>Pair</code> and <code>Triple</code>;</li>
             <li>The unit type (<code>()</code>) are replaced with <code>Unit</code>;</li>
             <li>Typeclasses method have their typeclass in a separated constraint group.
             For instance, <code>traverse</code> has <code>Traversable t => Applicative f => (a -> f b) -> t a -> f (t b)</code> instead of <code>(Traversable t, Applicative f) => …</code></li>
