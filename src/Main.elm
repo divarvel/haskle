@@ -10,7 +10,7 @@ import Dict as Dict
 import Set as Set
 import Set exposing (Set)
 import Browser
-import Html exposing (Html, button, div, text, datalist, option, input, form, br, a, span)
+import Html exposing (Html, button, div, text, datalist, option, input, form, br, a, span, p)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Html.Attributes as A
 import Parser exposing (..)
@@ -405,7 +405,12 @@ viewGame state =
                  , A.disabled hasError
                  ] [text "guess"]
         , br [] []
-        , span [A.class "game-number"] [ text ("Game #" ++ String.fromInt state.gameNumber)]
+        , p [A.class "game-number"]
+            [ text ("Set: ")
+            , a [A.href "https://hackage.haskell.org/package/base/docs/Prelude.html"]
+                [text "Prelude"]
+            , text (" | Game #" ++ String.fromInt state.gameNumber ++ " ")
+            ]
         ]
   in
      if List.head (List.reverse state.guesses) == Just state.answer
@@ -436,35 +441,54 @@ viewGuesses state =
       List.take 10 (guesses ++ empty)
         |> div [A.class "guesses"]
 
+gameIsOver : Bool -> GameState -> Html Msg
+gameIsOver isWon state =
+  let
+      answer = div [ A.class "answer" ]
+                   [ span [] [text (state.answer.name ++ " ")]
+                   , span [] [text " :: "]
+                   , span [] [text (display state.answer.signature ++ " ")]
+                   , a [A.href (haddockUrl "(<*>)")] [text "view on hackage"]
+                   ]
+      guesses = viewGuesses state
+      shareButton = a [A.href (twitterUrl state), A.class "share-link"]
+                      [text "Share on twitter"]
+      nextGame = div [A.class "next-game"]
+                     [ button [onClick NextGame] [text "Try another one"]
+                     ]
+   in
+      if isWon
+      then div [] [answer, guesses, shareButton, nextGame]
+      else div [] [answer, guesses, nextGame]
+
 gameIsWon : GameState -> Html Msg
-gameIsWon state =
-  div []
-    [ div [A.class "answer"]
-          [ span [] [text (state.answer.name ++ " ")]
-          , span [] [text " :: "]
-          , span [] [text (display state.answer.signature ++ " ")]
-          ]
-    , viewGuesses state
-    , a [A.href (twitterUrl state), A.class "share-link"]
-        [text "Share on twitter"]
-    , div [A.class "next-game"]
-        [ button [onClick NextGame] [text "Try another one"]
-        ]
-    ]
+gameIsWon = gameIsOver True
 
 gameIsLost : GameState -> Html Msg
-gameIsLost state =
-  div []
-    [ div [A.class "answer"]
-          [ span [] [text (state.answer.name ++ " ")]
-          , span [] [text " :: "]
-          , span [] [text (display state.answer.signature ++ " ")]
-          ]
-    , viewGuesses state
-    , div [A.class "next-game"]
-        [ button [onClick NextGame] [text "Try another one"]
-        ]
-    ]
+gameIsLost = gameIsOver False
+
+haddockUrl : String -> String
+haddockUrl name =
+  let
+      escapeChar p char =
+        if p char
+        then String.fromChar char
+        else "-" ++ String.fromInt (Char.toCode char) ++ "-"
+      isLegal char =
+        case char of
+          ':' -> True
+          '_' -> True
+          '.' -> True
+          _   -> Char.isAlphaNum char
+      escaped = case String.toList name of
+        (c :: cs) -> String.concat (escapeChar Char.isAlpha c :: List.map (escapeChar isLegal) cs)
+        _ -> name
+  in
+     Url.custom
+       (Url.CrossOrigin "https://hackage.haskell.org")
+       ["package", "base", "docs", "Prelude.html"]
+       []
+       (Just ("v:" ++ escaped))
 
 twitterUrl : GameState -> String
 twitterUrl state =
