@@ -62,7 +62,7 @@ url : FunctionSet -> String
 url fs = case fs of
   HaskellPrelude -> "https://hackage.haskell.org/package/base/docs/Prelude.html"
   JustTraverse -> "https://hackage.haskell.org/package/base/docs/Prelude.html#v:traverse"
-  LensOperators -> "https://hackage.haskell.org/package/lens/docs/Control.Lens.html"
+  LensOperators -> "https://hackage.haskell.org/package/lens/docs/Control-Lens.html"
 
 mkFunctionUrl : FunctionSet -> String -> String
 mkFunctionUrl fs name = case fs of
