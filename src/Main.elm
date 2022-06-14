@@ -272,6 +272,9 @@ update msg model =
              (Just a, _) -> persist { state | functionSet = fs
                                             , answer = a
                                             , showFunctionSetPicker = False
+                                            , guesses = Dict.empty
+                                            , knownIdents = Set.empty
+                                            , knownChars = Set.empty
                                             }
              (Nothing, _) -> (Loaded state, Cmd.none)
          Nothing -> (Loaded state, Cmd.none)
