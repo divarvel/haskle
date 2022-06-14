@@ -10,7 +10,7 @@ import Dict as Dict
 import Set as Set
 import Set exposing (Set)
 import Browser
-import Html exposing (Html, button, div, text, datalist, option, input, form, br, a, span, p)
+import Html exposing (Html, button, div, text, datalist, option, input, form, br, a, span, p, select)
 import Html.Events exposing (onClick, onInput, onSubmit)
 import Html.Attributes as A
 import Parser exposing (..)
@@ -18,6 +18,7 @@ import Parser as Parser
 import Result.Extra exposing (combineMap)
 import Json.Decode as Decode
 import Json.Encode as Encode
+import FunctionSet exposing (FunctionSet (..), functionSetEncoder, functionSetDecoder, mkFunctionUrl, displayName)
 
 port persistState : Encode.Value -> Cmd msg
 
@@ -27,14 +28,17 @@ type alias InitFlags =
   }
 
 type alias PersistedState =
-  { guesses : List Function
+  { guesses : Dict String (List Function)
   , initialSeed : Int
-  , gameNumber : Int
+  , gameNumber : Dict String Int
+  , functionSet : FunctionSet
   }
 
 type Msg = Input String
          | Guess
          | NextGame
+         | ChangeSet String
+         | DisplayChangeSetPicker
 
 type TypeElem
   = Literal String
@@ -49,15 +53,17 @@ type alias Function =
 
 type alias GameState =
   { answer : Function
-  , guesses : List Function
+  , guesses : Dict String (List Function)
   , knownIdents : Set String
   , knownChars : Set Char
   , input : String
-  , allFuncs : Dict String Signature
+  , allSets : Dict String (Dict String Signature)
   , initialSeed : Int
   , nextSeed : Random.Seed
-  , gameNumber : Int
+  , gameNumber : Dict String Int
   , error : Maybe String
+  , functionSet : FunctionSet
+  , showFunctionSetPicker : Bool
   }
 
 type Model =
@@ -80,7 +86,7 @@ init initFlags =
     Ok ({initialSeed, initialState}) ->
         ( case results of
             Err _ -> FunctionsError
-            Ok allFuncs -> computeState allFuncs initialSeed initialState
+            Ok allSets -> computeState allSets initialSeed initialState
         , Cmd.none
         )
 
@@ -92,15 +98,34 @@ flagsDecoder =
 
 persistedStateDecoder : Decode.Decoder PersistedState
 persistedStateDecoder =
-  Decode.map3 PersistedState
-    (Decode.field "guesses" (Decode.list functionDecoder))
-    (Decode.field "initialSeed" Decode.int)
-    (Decode.field "gameNumber" Decode.int)
+  let
+      fset = Decode.oneOf
+               [ Decode.field "functionSet" functionSetDecoder
+               , Decode.succeed HaskellPrelude
+               ]
+      gn = Decode.oneOf
+               [ Decode.dict Decode.int
+               , Decode.int
+                   |> Decode.map (Dict.singleton (FunctionSet.asKey HaskellPrelude))
+               ]
+      gs = Decode.oneOf
+               [ Decode.dict (Decode.list functionDecoder)
+               , Decode.list functionDecoder
+                   |> Decode.map (Dict.singleton (FunctionSet.asKey HaskellPrelude))
+               ]
+   in
+      Decode.map4 PersistedState
+        (Decode.field "guesses" gs)
+        (Decode.field "initialSeed" Decode.int)
+        (Decode.field "gameNumber" gn)
+        fset
 
-persistedStateEncoder { guesses, initialSeed, gameNumber } =
-  Encode.object [ ("guesses", Encode.list functionEncoder guesses)
+persistedStateEncoder : PersistedState -> Encode.Value
+persistedStateEncoder { guesses, initialSeed, gameNumber, functionSet } =
+  Encode.object [ ("guesses", Encode.dict identity (Encode.list functionEncoder) guesses)
                 , ("initialSeed", Encode.int initialSeed)
-                , ("gameNumber", Encode.int gameNumber)
+                , ("gameNumber", Encode.dict identity Encode.int gameNumber)
+                , ("functionSet", functionSetEncoder functionSet)
                 ]
 
 functionDecoder : Decode.Decoder Function
@@ -137,23 +162,27 @@ typeElemEncoder elem =
                                  , ("value", Encode.string value)
                                  ]
 
-computeState : Dict String Signature -> Int -> Maybe PersistedState
+computeState : Dict String (Dict String Signature) -> Int -> Maybe PersistedState
             -> Model
-computeState allFuncs initialSeed mState =
+computeState allSets initialSeed mState =
   let
+      defaultSet = HaskellPrelude
       fromScratch =
-        case getAnswer (Random.initialSeed initialSeed) allFuncs of
+        case getAnswer (Random.initialSeed initialSeed) defaultSet allSets of
           (Nothing, _)   -> FunctionsError
           (Just a, nextSeed) -> Loaded { answer = a
-                                       , guesses = []
+                                       , guesses = Dict.empty
                                        , knownIdents = Set.empty
                                        , knownChars = Set.empty
                                        , input = ""
-                                       , allFuncs = allFuncs
+                                       , allSets = allSets
                                        , initialSeed = initialSeed
                                        , nextSeed = nextSeed
-                                       , gameNumber = 1
+                                       , gameNumber = Dict.singleton (FunctionSet.asKey defaultSet)
+                                                                     1
                                        , error = Nothing
+                                       , functionSet = defaultSet
+                                       , showFunctionSetPicker = False
                                        }
    in
       case mState of
@@ -162,22 +191,24 @@ computeState allFuncs initialSeed mState =
           if initialSeed /= persisted.initialSeed
           then fromScratch
           else
-            case getNthAnswer (Random.initialSeed initialSeed) allFuncs persisted.gameNumber of
+            case getNthAnswer (Random.initialSeed initialSeed) persisted.functionSet allSets (activeGameNumber persisted) of
               (Nothing, _) -> FunctionsError
               (Just a, nextSeed) ->
                 let
-                    (knownIdents, knownChars) = computeKnownIdentsFromScratch a persisted.guesses
+                    (knownIdents, knownChars) = computeKnownIdentsFromScratch a (activeGuesses persisted)
                  in
                     Loaded { answer = a
                            , guesses = persisted.guesses
                            , knownIdents = knownIdents
                            , knownChars = knownChars
                            , input = ""
-                           , allFuncs = allFuncs
+                           , allSets = allSets
                            , initialSeed = initialSeed
                            , nextSeed = nextSeed
                            , gameNumber = persisted.gameNumber
                            , error = Nothing
+                           , functionSet = persisted.functionSet
+                           , showFunctionSetPicker = False
                            }
 
 computeKnownIdentsFromScratch : Function -> List Function -> (Set String, Set Char)
@@ -200,19 +231,49 @@ computeKnownIdents answer guess (knownIdents, knownChars) =
    in
       (newIdents, newChars)
 
+activeFunctionSet {functionSet,allSets} =
+  allSets
+    |> Dict.get (FunctionSet.asKey functionSet)
+    |> Maybe.withDefault Dict.empty
+
+activeGameNumber {functionSet,gameNumber} =
+  gameNumber
+    |> Dict.get (FunctionSet.asKey functionSet)
+    |> Maybe.withDefault 1
+
+activeGuesses {functionSet,guesses} =
+  guesses
+    |> Dict.get (FunctionSet.asKey functionSet)
+    |> Maybe.withDefault []
+
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case (model, msg) of
     (FunctionsError, _) -> (FunctionsError, Cmd.none)
     (Loaded state, Input i) ->
        (Loaded { state | input = i, error = Nothing }, Cmd.none)
+    (Loaded state, ChangeSet fss) ->
+       case FunctionSet.fromKey fss of
+         Just fs ->
+           case getNthAnswer
+                  (Random.initialSeed state.initialSeed)
+                  fs state.allSets
+                  (activeGameNumber { state | functionSet = fs}) of
+             (Just a, _) -> persist { state | functionSet = fs
+                                            , answer = a
+                                            , showFunctionSetPicker = False
+                                            }
+             (Nothing, _) -> (Loaded state, Cmd.none)
+         Nothing -> (Loaded state, Cmd.none)
+    (Loaded state, DisplayChangeSetPicker) ->
+       persist { state | showFunctionSetPicker = True }
     (Loaded state, Guess) ->
-       if List.member state.input (List.map .name state.guesses)
+       if List.member state.input (List.map .name (activeGuesses state))
        then (Loaded { state | error = Just "This function has been tried already"
                             }, Cmd.none)
        else
-         case Dict.get state.input state.allFuncs of
-           Nothing -> (Loaded { state | error = Just "This function is not part of the prelude"
+         case Dict.get state.input (activeFunctionSet state) of
+           Nothing -> (Loaded { state | error = Just ("This function is not part of " ++ displayName state.functionSet)
                                       }, Cmd.none)
            Just signature ->
              let
@@ -221,24 +282,32 @@ update msg model =
                                                                         ,state.knownChars)
               in
                  persist { state |
-                           guesses = state.guesses ++ [g],
+                           guesses = state.guesses
+                                       |> Dict.insert
+                                            (FunctionSet.asKey state.functionSet)
+                                            (activeGuesses state ++ [g]),
                            knownIdents = newIdents,
                            knownChars = newChars,
                            input = ""
                            }
     (Loaded state, NextGame) ->
-       case getAnswer (state.nextSeed) state.allFuncs of
+       case getAnswer (state.nextSeed) state.functionSet state.allSets of
          (Nothing, _)       -> (FunctionsError, Cmd.none)
          (Just a, nextSeed) -> persist { answer = a
-                                       , guesses = []
+                                       , guesses = Dict.empty
                                        , knownIdents = Set.empty
                                        , knownChars = Set.empty
                                        , input = ""
-                                       , allFuncs = state.allFuncs
+                                       , allSets = state.allSets
                                        , initialSeed = state.initialSeed
                                        , nextSeed = nextSeed
-                                       , gameNumber = 1 + state.gameNumber
+                                       , gameNumber = state.gameNumber
+                                                        |> Dict.insert
+                                                             (FunctionSet.asKey state.functionSet)
+                                                             (1 + activeGameNumber state)
                                        , error = Nothing
+                                       , functionSet = state.functionSet
+                                       , showFunctionSetPicker = False
                                        }
 
 persist : GameState -> (Model, Cmd Msg)
@@ -249,13 +318,16 @@ persist state =
                     { guesses = guesses
                     , initialSeed = initialSeed
                     , gameNumber = gameNumber
+                    , functionSet = state.functionSet
                     }
    in
       (Loaded state, persistState toPersist)
 
-getAnswer : Random.Seed -> Dict String Signature -> (Maybe Function, Random.Seed)
-getAnswer seed allFuncs =
+getAnswer : Random.Seed -> FunctionSet -> Dict String (Dict String Signature) -> (Maybe Function, Random.Seed)
+getAnswer seed fs allSets =
   let
+      allFuncs = Dict.get (FunctionSet.asKey fs) allSets
+                   |> Maybe.withDefault Dict.empty
       maxIndex = Dict.size allFuncs - 1
       (randomIndex, nextSeed) = Random.step (Random.int 0 maxIndex) seed
       randomKey = Dict.keys allFuncs
@@ -267,17 +339,21 @@ getAnswer seed allFuncs =
    in
       (randomValue, nextSeed)
 
-getNthAnswer : Random.Seed -> Dict String Signature -> Int -> (Maybe Function, Random.Seed)
-getNthAnswer seed allFuncs gameNumber =
+getNthAnswer : Random.Seed -> FunctionSet -> Dict String (Dict String Signature) -> Int -> (Maybe Function, Random.Seed)
+getNthAnswer seed fs allSets gameNumber =
   let
       go currentSeed currentGame =
            if currentGame < 1
            then (Nothing, currentSeed)
            else if currentGame == 1
-           then getAnswer currentSeed allFuncs
+           then getAnswer currentSeed fs allSets
            else
              let
-                 maxIndex = Dict.size allFuncs - 1
+                 maxIndex = allSets
+                              |> Dict.get (FunctionSet.asKey fs)
+                              |> Maybe.withDefault Dict.empty
+                              |> Dict.size
+                              |> (\s -> s - 1)
                  (_, nextSeed) = Random.step (Random.int 0 maxIndex) currentSeed
               in
                  go nextSeed (currentGame - 1)
@@ -384,7 +460,7 @@ viewGame state =
                        state.answer.signature
       garbledName = garbleName state.knownChars
                                state.answer.name
-      possibilities = state.allFuncs
+      possibilities = activeFunctionSet state
                         |> Dict.keys
                         |> List.map (\name -> option [A.value name] [])
                         |> datalist [A.id "function-names"]
@@ -394,29 +470,44 @@ viewGame state =
       errorClass = if hasError
                    then "error display"
                    else "error"
+      mkOption fs = option [ A.value (FunctionSet.asKey fs)
+                           , A.selected (fs == state.functionSet)
+                           ] [text (displayName fs)]
+      setDisplay = if state.showFunctionSetPicker
+                   then
+                     [ text ("Set: ")
+                     , select
+                        [onInput ChangeSet]
+                        (List.map mkOption FunctionSet.availableSets)
+                     , text (" | Game #" ++ String.fromInt (activeGameNumber state) ++ " ")
+                     ]
+                   else
+                     [ text ("Set: ")
+                     , a [A.href (FunctionSet.url state.functionSet)]
+                         [text (displayName state.functionSet)]
+                     , button [onClick DisplayChangeSetPicker] [text "⌄"]
+                     , text (" | Game #" ++ String.fromInt (activeGameNumber state) ++ " ")
+                     ]
       nameInput = form [onSubmit Guess]
         [ span [A.class errorClass] [text (Maybe.withDefault "" state.error)]
         , input [ onInput Input, A.list "function-names"
                 , A.value state.input
-                , A.placeholder "a function from Prelude"
+                , A.placeholder ("a function from " ++ displayName state.functionSet)
                 ] []
         , br [] []
         , button [ A.type_ "submit"
                  , A.disabled hasError
                  ] [text "guess"]
-        , br [] []
-        , p [A.class "game-number"]
-            [ text ("Set: ")
-            , a [A.href "https://hackage.haskell.org/package/base/docs/Prelude.html"]
-                [text "Prelude"]
-            , text (" | Game #" ++ String.fromInt state.gameNumber ++ " ")
-            ]
         ]
+      formFooter =
+        p [A.class "game-number"]
+          setDisplay
+      guesses = activeGuesses state
   in
-     if List.head (List.reverse state.guesses) == Just state.answer
+     if List.head (List.reverse guesses) == Just state.answer
      then
         gameIsWon state
-     else if List.length state.guesses >= 10
+     else if List.length guesses >= 10
      then
         gameIsLost state
      else
@@ -429,14 +520,15 @@ viewGame state =
           , viewGuesses state
           , possibilities
           , nameInput
+          , formFooter
           ]
 
 viewGuesses : GameState -> Html Msg
 viewGuesses state =
   let
       empty = List.repeat 10 (div [A.class "empty"] [])
-      guesses = state.guesses
-                  |>List.map (viewGuess state.answer)
+      guesses = activeGuesses state
+                  |> List.map (viewGuess state.answer)
    in
       List.take 10 (guesses ++ empty)
         |> div [A.class "guesses"]
@@ -448,7 +540,7 @@ gameIsOver isWon state =
                    [ span [] [text (state.answer.name ++ " ")]
                    , span [] [text " :: "]
                    , span [] [text (display state.answer.signature ++ " ")]
-                   , a [A.href (haddockUrl "(<*>)")] [text "view on hackage"]
+                   , a [A.href (mkFunctionUrl state.functionSet state.answer.name)] [text "view definition"]
                    ]
       guesses = viewGuesses state
       shareButton = a [A.href (twitterUrl state), A.class "share-link"]
@@ -467,29 +559,6 @@ gameIsWon = gameIsOver True
 gameIsLost : GameState -> Html Msg
 gameIsLost = gameIsOver False
 
-haddockUrl : String -> String
-haddockUrl name =
-  let
-      escapeChar p char =
-        if p char
-        then String.fromChar char
-        else "-" ++ String.fromInt (Char.toCode char) ++ "-"
-      isLegal char =
-        case char of
-          ':' -> True
-          '_' -> True
-          '.' -> True
-          _   -> Char.isAlphaNum char
-      escaped = case String.toList name of
-        (c :: cs) -> String.concat (escapeChar Char.isAlpha c :: List.map (escapeChar isLegal) cs)
-        _ -> name
-  in
-     Url.custom
-       (Url.CrossOrigin "https://hackage.haskell.org")
-       ["package", "base", "docs", "Prelude.html"]
-       []
-       (Just ("v:" ++ escaped))
-
 twitterUrl : GameState -> String
 twitterUrl state =
   Url.crossOrigin
@@ -499,11 +568,11 @@ twitterUrl state =
 
 twitterMessage : GameState -> String
 twitterMessage state = String.join " "
-  [ "I've found today's https://haskle.net "
-  , "#" ++ String.fromInt state.gameNumber
-  , "function in"
-  , String.fromInt (List.length state.guesses)
-  , "trie(s)!"
+  [ "I've found today's https://haskle.net"
+  , FunctionSet.asKey state.functionSet ++ "#" ++ String.fromInt (activeGameNumber state)
+  , "function after"
+  , String.fromInt (List.length (activeGuesses state))
+  , "guess(es)!"
   ]
 
 func : Parser Function
@@ -548,237 +617,35 @@ sigIdent = getChompedString <|
     |. chompIf (\c -> Char.isAlphaNum c)
     |. chompWhile (\c -> Char.isAlphaNum c)
 
-results : Result (List DeadEnd) (Dict String Signature)
-results =
-  case combineMap (run func) rawFuncs of
-    Ok parsedFuncs ->
-         parsedFuncs
-           |> List.map (\f -> (f.name, f.signature))
-           |> Dict.fromList
-           |> Ok
-    Err x -> Err x
 
-rawFuncs : List String
-rawFuncs =
-  [ "(!!) :: List a -> Int -> a"
-  , "($) :: (a -> b) -> a -> b"
-  , "($!) :: (a -> b) -> a -> b"
-  , "(&&) :: Bool -> Bool -> Bool"
-  , "(++) :: List a -> List a -> List a"
-  , "(.) :: (b -> c) -> (a -> b) -> a -> c"
-  , "(<$>) :: Functor f => (a -> b) -> f a -> f b"
-  , "(=<<) :: Monad m => (a -> m b) -> m a -> m b"
-  , "pure :: Applicative f => a -> f a"
-  , "(<*>) :: Applicative f => f (a -> b) -> f a -> f b"
-  , "liftA2 :: Applicative f => (a -> b -> c) -> f a -> f b -> f c"
-  , "(*>) :: Applicative f => f a -> f b -> f b"
-  , "(<*) :: Applicative f => f a -> f b -> f a"
-  , "minBound :: Bounded a => a"
-  , "maxBound :: Bounded a => a"
-  , "succ :: Enum a => a -> a"
-  , "pred :: Enum a => a -> a"
-  , "toEnum :: Enum a => Int -> a"
-  , "fromEnum :: Enum a => a -> Int"
-  , "enumFrom :: Enum a => a -> List a"
-  , "enumFromThen :: Enum a => a -> a -> List a"
-  , "enumFromTo :: Enum a => a -> a -> List a"
-  , "enumFromThenTo :: Enum a => a -> a -> a -> List a"
-  , "(==) :: Eq a => a -> a -> Bool"
-  , "(/=) :: Eq a => a -> a -> Bool"
-  , "pi :: Floating a => a"
-  , "exp :: Floating a => a -> a"
-  , "log :: Floating a => a -> a"
-  , "sqrt :: Floating a => a -> a"
-  , "(**) :: Floating a => a -> a -> a"
-  , "logBase :: Floating a => a -> a -> a"
-  , "sin :: Floating a => a -> a"
-  , "cos :: Floating a => a -> a"
-  , "tan :: Floating a => a -> a"
-  , "asin :: Floating a => a -> a"
-  , "acos :: Floating a => a -> a"
-  , "atan :: Floating a => a -> a"
-  , "sinh :: Floating a => a -> a"
-  , "cosh :: Floating a => a -> a"
-  , "tanh :: Floating a => a -> a"
-  , "asinh :: Floating a => a -> a"
-  , "acosh :: Floating a => a -> a"
-  , "atanh :: Floating a => a -> a"
-  , "log1p :: Floating a => a -> a"
-  , "expm1 :: Floating a => a -> a"
-  , "log1pexp :: Floating a => a -> a"
-  , "log1mexp :: Floating a => a -> a"
-  , "fold :: Foldable t => Monoid m => t m -> m"
-  , "foldMap :: Foldable t => Monoid m => (a -> m) -> t a -> m"
-  , "foldMap' :: Foldable t => Monoid m => (a -> m) -> t a -> m"
-  , "foldr :: Foldable t => (a -> b -> b) -> b -> t a -> b"
-  , "foldr' :: Foldable t => (a -> b -> b) -> b -> t a -> b"
-  , "foldl :: Foldable t => (b -> a -> b) -> b -> t a -> b"
-  , "foldl' :: Foldable t => (b -> a -> b) -> b -> t a -> b"
-  , "foldr1 :: Foldable t => (a -> a -> a) -> t a -> a"
-  , "foldl1 :: Foldable t => (a -> a -> a) -> t a -> a"
-  , "toList :: Foldable t => t a -> List a"
-  , "null :: Foldable t => t a -> Bool"
-  , "length :: Foldable t => t a -> Int"
-  , "elem :: Foldable t => Eq a => a -> t a -> Bool"
-  , "maximum :: Foldable t => Ord a => t a -> a"
-  , "minimum :: Foldable t => Ord a => t a -> a"
-  , "sum :: Foldable t => Num a => t a -> a"
-  , "product :: Foldable t => Num a => t a -> a"
-  , "(/) :: Fractional a => a -> a -> a"
-  , "recip :: Fractional a => a -> a"
-  , "fromRational :: Fractional a => Rational -> a"
-  , "fmap :: Functor f => (a -> b) -> f a -> f b"
-  , "(<$) :: Functor f => a -> f b -> f a"
-  , "quot :: Integral a => a -> a -> a"
-  , "rem :: Integral a => a -> a -> a"
-  , "div :: Integral a => a -> a -> a"
-  , "mod :: Integral a => a -> a -> a"
-  , "quotRem :: Integral a => a -> a -> Tuple a a"
-  , "divMod :: Integral a => a -> a -> Tuple a a"
-  , "toInteger :: Integral a => a -> Integer"
-  , "(>>=) :: Monad m => m a -> (a -> m b) -> m b"
-  , "(>>) :: Monad m => m a -> m b -> m b"
-  , "return :: Monad m => a -> m a"
-  , "fail :: MonadFail => String -> m a"
-  , "mempty :: Monoid a => a"
-  , "mappend :: Monoid a => a -> a -> a"
-  , "mconcat :: Monoid a => List a -> a"
-  , "(+) :: Num a => a -> a -> a"
-  , "(-) :: Num a => a -> a -> a"
-  , "(*) :: Num a => a -> a -> a"
-  , "negate :: Num a => a -> a"
-  , "abs :: Num a => a -> a"
-  , "signum :: Num a => a -> a"
-  , "fromInteger :: Num a => Integer -> a"
-  , "compare :: Ord a => a -> a -> Ordering"
-  , "(<) :: Ord a => a -> a -> Bool"
-  , "(<=) :: Ord a => a -> a -> Bool"
-  , "(>) :: Ord a => a -> a -> Bool"
-  , "(>=) :: Ord a => a -> a -> Bool"
-  , "max :: Ord a => a -> a -> a"
-  , "min :: Ord a => a -> a -> a"
-  , "readsPrec :: Read a => Int -> ReadS a"
-  , "readList :: Read a => ReadS (List a)"
-  , "toRational :: Real a => a -> Rational"
-  , "floatRadix :: RealFloat a => a -> Integer"
-  , "floatDigits :: RealFloat a => a -> Int"
-  , "floatRange :: RealFloat a => a -> Tuple Int Int"
-  , "decodeFloat :: RealFloat a => a -> Tuple Integer Int"
-  , "encodeFloat :: RealFloat a => Integer -> Int -> a"
-  , "exponent :: RealFloat a => a -> Int"
-  , "significand :: RealFloat a => a -> a"
-  , "scaleFloat :: RealFloat a => Int -> a -> a"
-  , "isNaN :: RealFloat a => a -> Bool"
-  , "isInfinite :: RealFloat a => a -> Bool"
-  , "isDenormalized :: RealFloat a => a -> Bool"
-  , "isNegativeZero :: RealFloat a => a -> Bool"
-  , "isIEEE :: RealFloat a => a -> Bool"
-  , "atan2 :: RealFloat a => a -> a -> a"
-  , "properFraction :: RealFrac a => Integral b => a -> Tuple b a"
-  , "truncate :: RealFrac a => Integral b => a -> b"
-  , "round :: RealFrac a => Integral b => a -> b"
-  , "ceiling :: RealFrac a => Integral b => a -> b"
-  , "floor :: RealFrac a => Integral b => a -> b"
-  , "(<>) :: Semigroup a => a -> a -> a"
-  , "sconcat :: Semigroup a => NonEmpty a -> a"
-  , "stimes :: Semigroup a => Integral b => b -> a -> a"
-  , "showsPrec :: Show a => Int -> a -> ShowS"
-  , "show :: Show a => a -> String"
-  , "showList :: Show a => List a -> ShowS"
-  , "traverse :: Traversable t => Applicative f => (a -> f b) -> t a -> f (t b)"
-  , "sequenceA :: Traversable t => Applicative f => t (f a) -> f (t a)"
-  , "mapM :: Traversable t => Monad m => (a -> m b) -> t a -> m (t b)"
-  , "sequence :: Traversable t => Monad m => t (m a) -> m (t a)"
-  , "(^) :: (Num a, Integral b) => a -> b -> a"
-  , "(^^) :: (Fractional a, Integral b) => a -> b -> a"
-  , "all :: Foldable t => (a -> Bool) -> t a -> Bool"
-  , "and :: Foldable t => t Bool -> Bool"
-  , "any :: Foldable t => (a -> Bool) -> t a -> Bool"
-  , "appendFile :: FilePath -> String -> IO Unit"
-  , "asTypeOf :: a -> a -> a"
-  , "break :: (a -> Bool) -> List a -> Tuple (List a) (List a)"
-  , "concat :: Foldable t => t (List a) -> List a"
-  , "concatMap :: Foldable t => (a -> List b) -> t a -> List b"
-  , "const :: a -> b -> a"
-  , "curry :: ((Tuple a b) -> c) -> a -> b -> c"
-  , "cycle :: List a -> List a"
-  , "drop :: Int -> List a -> List a"
-  , "dropWhile :: (a -> Bool) -> List a -> List a"
-  , "either :: (a -> c) -> (b -> c) -> Either a b -> c"
-  , "error :: HasCallStack => List Char -> a"
-  , "errorWithoutStackTrace :: List Char -> a"
-  , "even :: Integral a => a -> Bool"
-  , "filter :: (a -> Bool) -> List a -> List a"
-  , "flip :: (a -> b -> c) -> b -> a -> c"
-  , "fromIntegral :: (Integral a, Num b) => a -> b"
-  , "fst :: Tuple a b -> a"
-  , "gcd :: Integral a => a -> a -> a"
-  , "getChar :: IO Char"
-  , "getContents :: IO String"
-  , "getLine :: IO String"
-  , "head :: List a -> a"
-  , "id :: a -> a"
-  , "init :: List a -> List a"
-  , "interact :: (String -> String) -> IO Unit"
-  , "ioError :: IOError -> IO a"
-  , "iterate :: (a -> a) -> a -> List a"
-  , "last :: List a -> a"
-  , "lcm :: Integral a => a -> a -> a"
-  , "lex :: ReadS String"
-  , "lines :: String -> List String"
-  , "lookup :: Eq a => a -> List (Tuple a b) -> Maybe b"
-  , "map :: (a -> b) -> List a -> List b"
-  , "mapM_ :: (Foldable t, Monad m) => (a -> m b) -> t a -> m Unit"
-  , "maybe :: b -> (a -> b) -> Maybe a -> b"
-  , "not :: Bool -> Bool"
-  , "notElem :: (Foldable t, Eq a) => a -> t a -> Bool"
-  , "odd :: Integral a => a -> Bool"
-  , "or :: Foldable t => t Bool -> Bool"
-  , "otherwise :: Bool"
-  , "print :: Show a => a -> IO Unit"
-  , "putChar :: Char -> IO Unit"
-  , "putStr :: String -> IO Unit"
-  , "putStrLn :: String -> IO Unit"
-  , "read :: Read a => String -> a"
-  , "readFile :: FilePath -> IO String"
-  , "readIO :: Read a => String -> IO a"
-  , "readLn :: Read a => IO a"
-  , "readParen :: Bool -> ReadS a -> ReadS a"
-  , "reads :: Read a => ReadS a"
-  , "realToFrac :: (Real a, Fractional b) => a -> b"
-  , "repeat :: a -> List a"
-  , "replicate :: Int -> a -> List a"
-  , "reverse :: List a -> List a"
-  , "scanl :: (b -> a -> b) -> b -> List a -> List b"
-  , "scanl1 :: (a -> a -> a) -> List a -> List a"
-  , "scanr :: (a -> b -> b) -> b -> List a -> List b"
-  , "scanr1 :: (a -> a -> a) -> List a -> List a"
-  , "seq :: a -> b -> b"
-  , "sequence_ :: (Foldable t, Monad m) => t (m a) -> m Unit"
-  , "showChar :: Char -> ShowS"
-  , "showParen :: Bool -> ShowS -> ShowS"
-  , "showString :: String -> ShowS"
-  , "shows :: Show a => a -> ShowS"
-  , "snd :: Tuple a b -> b"
-  , "span :: (a -> Bool) -> List a -> Tuple (List a) (List a)"
-  , "splitAt :: Int -> List a -> Tuple (List a) (List a)"
-  , "subtract :: Num a => a -> a -> a"
-  , "tail :: List a -> List a"
-  , "take :: Int -> List a -> List a"
-  , "takeWhile :: (a -> Bool) -> List a -> List a"
-  , "uncurry :: (a -> b -> c) -> Tuple a b -> c"
-  , "undefined :: HasCallStack => a"
-  , "unlines :: List String -> String"
-  , "until :: (a -> Bool) -> (a -> a) -> a -> a"
-  , "unwords :: List String -> String"
-  , "unzip :: List (Tuple a b) -> Tuple (List a) (List b)"
-  , "unzip3 :: List (Tuple3 a b c) -> Tuple3 (List a) (List b) (List c)"
-  , "userError :: String -> IOError"
-  , "words :: String -> List String"
-  , "writeFile :: FilePath -> String -> IO Unit"
-  , "zip :: List a -> List b -> List (Tuple a b)"
-  , "zip3 :: List a -> List b -> List c -> List (Tuple3 a b c)"
-  , "zipWith :: (a -> b -> c) -> List a -> List b -> List c"
-  , "zipWith3 :: (a -> b -> c -> d) -> List a -> List b -> List c -> List d"
-  , "(||) :: Bool -> Bool -> Bool"
-  ]
+parseOneSet : FunctionSet -> Result (List DeadEnd) (Dict String Signature)
+parseOneSet fs =
+  let
+      strings = FunctionSet.getAllFuncs fs
+   in
+      case combineMap (run func) strings of
+        Ok parsedFuncs ->
+             parsedFuncs
+               |> List.map (\f -> (f.name, f.signature))
+               |> Dict.fromList
+               |> Ok
+        Err x -> Err x
+
+
+
+
+results : Result () (Dict String (Dict String Signature))
+results =
+  let
+      keepSuccess (fs, res) = case res of
+        Ok x -> Just (fs, x)
+        _    -> Nothing
+      abortOnFailures pairs =
+        if List.length pairs > 0
+        then Ok (Dict.fromList pairs)
+        else Err ()
+   in
+      FunctionSet.availableSets
+        |> List.map (\fs -> (FunctionSet.asKey fs, parseOneSet fs))
+        |> List.filterMap keepSuccess
+        |> abortOnFailures
