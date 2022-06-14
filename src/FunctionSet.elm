@@ -6,13 +6,15 @@ import Json.Decode as Decode
 import Json.Decode exposing (andThen, succeed, fail)
 import Json.Encode as Encode
 import FunctionSet.HaskellPrelude exposing (haskellPrelude)
+import FunctionSet.LensOperators exposing (lensOperators)
 
 type FunctionSet
   = HaskellPrelude
   | JustTraverse
+  | LensOperators
 
 availableSets : List FunctionSet
-availableSets = [ HaskellPrelude, JustTraverse ]
+availableSets = [ HaskellPrelude, JustTraverse, LensOperators ]
 
 getAllFuncs : FunctionSet -> List String
 getAllFuncs fs = case fs of
@@ -20,17 +22,20 @@ getAllFuncs fs = case fs of
   JustTraverse ->
     [ "traverse :: Traversable t => Applicative f => (a -> f b) -> t a -> f (t b)"
     ]
+  LensOperators -> lensOperators
 
 asKey : FunctionSet -> String
 asKey fs = case fs of
   HaskellPrelude -> "haskell-prelude"
   JustTraverse -> "just-traverse"
+  LensOperators -> "lens-operators"
 
 fromKey : String -> Maybe FunctionSet
 fromKey s = case s of
   "haskell-prelude" -> Just HaskellPrelude
   "just-traverse" -> Just JustTraverse
-  _                 -> Nothing
+  "lens-operators" -> Just LensOperators
+  _                -> Nothing
 
 functionSetEncoder fs =
   asKey fs
@@ -51,11 +56,13 @@ displayName : FunctionSet -> String
 displayName fs = case fs of
   HaskellPrelude -> "the haskell prelude"
   JustTraverse -> "just traverse"
+  LensOperators -> "lens operators"
 
 url : FunctionSet -> String
 url fs = case fs of
   HaskellPrelude -> "https://hackage.haskell.org/package/base/docs/Prelude.html"
   JustTraverse -> "https://hackage.haskell.org/package/base/docs/Prelude.html#v:traverse"
+  LensOperators -> "https://hackage.haskell.org/package/lens/docs/Control.Lens.html"
 
 mkFunctionUrl : FunctionSet -> String -> String
 mkFunctionUrl fs name = case fs of
@@ -66,6 +73,7 @@ mkFunctionUrl fs name = case fs of
       []
       (Just ("v:" ++ haddockEscape name))
   JustTraverse ->  mkFunctionUrl HaskellPrelude "traverse"
+  LensOperators -> url LensOperators -- todo handle reexported names correctly
 
 haddockEscape : String -> String
 haddockEscape name =

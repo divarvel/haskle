@@ -614,8 +614,8 @@ sigLiteral = getChompedString <|
 sigIdent : Parser String
 sigIdent = getChompedString <|
   succeed ()
-    |. chompIf (\c -> Char.isAlphaNum c)
-    |. chompWhile (\c -> Char.isAlphaNum c)
+    |. chompIf (\c -> Char.isAlphaNum c || c == '\'')
+    |. chompWhile (\c -> Char.isAlphaNum c || c == '\'')
 
 
 parseOneSet : FunctionSet -> Result (List DeadEnd) (Dict String Signature)
