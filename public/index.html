@@ -258,13 +258,15 @@
       const year = now.getFullYear();
       const initialSeed = day + month + year + 2;
 
+      const initialSet = window.location.hash.substr(1);
       const initialState = JSON.parse(localStorage.getItem("haskle"));
 
       const app = Elm.Main.init({
         node: document.getElementById("haskle"),
         flags: {
           initialSeed,
-          initialState
+          initialState,
+          initialSet,
         }
       });
 

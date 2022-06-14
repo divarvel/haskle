@@ -25,6 +25,7 @@ port persistState : Encode.Value -> Cmd msg
 type alias InitFlags =
   { initialSeed : Int
   , initialState : Maybe PersistedState
+  , initialSet : String
   }
 
 type alias PersistedState =
@@ -83,18 +84,19 @@ init : Encode.Value -> (Model, Cmd Msg)
 init initFlags =
   case Decode.decodeValue flagsDecoder initFlags of
     Err e -> (FunctionsError, Cmd.none)
-    Ok ({initialSeed, initialState}) ->
+    Ok ({initialSeed, initialState, initialSet}) ->
         ( case results of
             Err _ -> FunctionsError
-            Ok allSets -> computeState allSets initialSeed initialState
+            Ok allSets -> computeState allSets initialSeed initialState (FunctionSet.fromKey initialSet)
         , Cmd.none
         )
 
 flagsDecoder : Decode.Decoder InitFlags
 flagsDecoder =
-  Decode.map2 InitFlags
+  Decode.map3 InitFlags
     (Decode.field "initialSeed" Decode.int)
     (Decode.maybe (Decode.field "initialState" (persistedStateDecoder)))
+    (Decode.field "initialSet" Decode.string)
 
 persistedStateDecoder : Decode.Decoder PersistedState
 persistedStateDecoder =
@@ -162,11 +164,14 @@ typeElemEncoder elem =
                                  , ("value", Encode.string value)
                                  ]
 
-computeState : Dict String (Dict String Signature) -> Int -> Maybe PersistedState
+computeState : Dict String (Dict String Signature)
+            -> Int
+            -> Maybe PersistedState
+            -> Maybe FunctionSet
             -> Model
-computeState allSets initialSeed mState =
+computeState allSets initialSeed mState mFs =
   let
-      defaultSet = HaskellPrelude
+      defaultSet = Maybe.withDefault HaskellPrelude mFs
       fromScratch =
         case getAnswer (Random.initialSeed initialSeed) defaultSet allSets of
           (Nothing, _)   -> FunctionsError
@@ -187,29 +192,34 @@ computeState allSets initialSeed mState =
    in
       case mState of
         Nothing -> fromScratch
-        Just persisted ->
-          if initialSeed /= persisted.initialSeed
-          then fromScratch
-          else
-            case getNthAnswer (Random.initialSeed initialSeed) persisted.functionSet allSets (activeGameNumber persisted) of
-              (Nothing, _) -> FunctionsError
-              (Just a, nextSeed) ->
-                let
-                    (knownIdents, knownChars) = computeKnownIdentsFromScratch a (activeGuesses persisted)
-                 in
-                    Loaded { answer = a
-                           , guesses = persisted.guesses
-                           , knownIdents = knownIdents
-                           , knownChars = knownChars
-                           , input = ""
-                           , allSets = allSets
-                           , initialSeed = initialSeed
-                           , nextSeed = nextSeed
-                           , gameNumber = persisted.gameNumber
-                           , error = Nothing
-                           , functionSet = persisted.functionSet
-                           , showFunctionSetPicker = False
-                           }
+        Just persisted_ ->
+          let
+              persisted = case mFs of
+                            Nothing -> persisted_
+                            Just fs -> { persisted_ | functionSet = fs }
+           in
+              if initialSeed /= persisted.initialSeed
+              then fromScratch
+              else
+                case getNthAnswer (Random.initialSeed initialSeed) persisted.functionSet allSets (activeGameNumber persisted) of
+                  (Nothing, _) -> FunctionsError
+                  (Just a, nextSeed) ->
+                    let
+                        (knownIdents, knownChars) = computeKnownIdentsFromScratch a (activeGuesses persisted)
+                     in
+                        Loaded { answer = a
+                               , guesses = persisted.guesses
+                               , knownIdents = knownIdents
+                               , knownChars = knownChars
+                               , input = ""
+                               , allSets = allSets
+                               , initialSeed = initialSeed
+                               , nextSeed = nextSeed
+                               , gameNumber = persisted.gameNumber
+                               , error = Nothing
+                               , functionSet = persisted.functionSet
+                               , showFunctionSetPicker = False
+                               }
 
 computeKnownIdentsFromScratch : Function -> List Function -> (Set String, Set Char)
 computeKnownIdentsFromScratch answer guesses =
