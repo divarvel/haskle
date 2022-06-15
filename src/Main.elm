@@ -269,10 +269,16 @@ update msg model =
                   (Random.initialSeed state.initialSeed)
                   fs state.allSets
                   (activeGameNumber { state | functionSet = fs}) of
-             (Just a, _) -> persist { state | functionSet = fs
-                                            , answer = a
-                                            , showFunctionSetPicker = False
-                                            }
+             (Just a, _) ->
+               let
+                   (knownIdents, knownChars) =
+                     computeKnownIdentsFromScratch a (activeGuesses { state | functionSet = fs})
+                in persist { state | functionSet = fs
+                                   , answer = a
+                                   , showFunctionSetPicker = False
+                                   , knownIdents = knownIdents
+                                   , knownChars = knownChars
+                                   }
              (Nothing, _) -> (Loaded state, Cmd.none)
          Nothing -> (Loaded state, Cmd.none)
     (Loaded state, DisplayChangeSetPicker) ->
