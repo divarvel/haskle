@@ -235,7 +235,7 @@ computeKnownIdents answer guess (knownIdents, knownChars) =
                  then Set.empty -- the type is not fully dicovered yet
                  else
                    let
-                       guessChars = Set.fromList (String.toList guess.name)
+                       guessChars = Set.fromList (String.toList guess.name ++ ['(',')'])
                     in
                        Set.union knownChars guessChars
    in
