@@ -70,6 +70,11 @@ type alias GameState =
 type Model =
     FunctionsError
   | Loaded GameState
+
+orElse : Maybe a -> Maybe a -> Maybe a
+orElse m1 m2 = case (m1, m2) of
+  (_, Just _) -> m2
+  (_, Nothing) -> m1
   
 
 main =
@@ -285,17 +290,23 @@ update msg model =
        persist { state | showFunctionSetPicker = True }
     (Loaded state, Guess) ->
        if List.member state.input (List.map .name (activeGuesses state))
+          || List.member ("(" ++ state.input ++ ")") (List.map .name (activeGuesses state))
        then (Loaded { state | error = Just "This function has been tried already"
                             }, Cmd.none)
        else
-         case Dict.get state.input (activeFunctionSet state) of
+         case Dict.get state.input (activeFunctionSet state)
+                |> orElse (Dict.get ("(" ++ state.input ++ ")") (activeFunctionSet state)) of
            Nothing -> (Loaded { state | error = Just ("This function is not part of " ++ displayName state.functionSet)
                                       }, Cmd.none)
            Just signature ->
              let
-                 g = { name = state.input, signature = signature }
+                 correctedInput = 
+                   if Dict.member ("(" ++ state.input ++ ")") (activeFunctionSet state)
+                   then "(" ++ state.input ++ ")"
+                   else state.input
+                 g = { name = correctedInput, signature = signature }
                  (newIdents, newChars) = computeKnownIdents state.answer g (state.knownIdents
-                                                                        ,state.knownChars)
+                                                                           ,state.knownChars)
               in
                  persist { state |
                            guesses = state.guesses
