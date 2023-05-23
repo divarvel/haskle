@@ -81,7 +81,7 @@ haskellPrelude =
   , "(>>=) :: Monad m => m a -> (a -> m b) -> m b"
   , "(>>) :: Monad m => m a -> m b -> m b"
   , "return :: Monad m => a -> m a"
-  , "fail :: MonadFail => String -> m a"
+  , "fail :: MonadFail m => String -> m a"
   , "mempty :: Monoid a => a"
   , "mappend :: Monoid a => a -> a -> a"
   , "mconcat :: Monoid a => List a -> a"
