@@ -18,6 +18,7 @@ import Result.Extra exposing (combineMap)
 import Json.Decode as Decode
 import Json.Encode as Encode
 import FunctionSet exposing (FunctionSet (..), functionSetEncoder, functionSetDecoder, mkFunctionUrl, displayName)
+import Json.Decode exposing (Value)
 
 port persistState : Encode.Value -> Cmd msg
 
@@ -82,6 +83,7 @@ orElse m1 m2 = case (m1, m2) of
   (_, Nothing) -> m1
   
 
+main : Program Value Model Msg
 main =
          Browser.element
            { init = init
@@ -148,6 +150,7 @@ functionDecoder =
     (Decode.field "name" Decode.string)
     (Decode.field "signature" (Decode.list typeElemDecoder))
 
+functionEncoder : Function -> Value
 functionEncoder {name, signature} =
   Encode.object [ ("name", Encode.string name)
                 , ("signature", Encode.list typeElemEncoder signature)
@@ -167,6 +170,7 @@ typeElemDecoder =
           _       -> Decode.fail ("Unknown kind " ++ kind ++ " not in (lit,ident)")
       )
 
+typeElemEncoder : TypeElem -> Value
 typeElemEncoder elem =
   case elem of
     Literal value -> Encode.object [ ("kind", Encode.string "lit")
@@ -257,16 +261,19 @@ computeKnownIdents answer guess (knownIdents, knownChars) =
    in
       (newIdents, newChars)
 
+activeFunctionSet : { a | functionSet : FunctionSet, allSets : Dict String (Dict k v) } -> Dict k v
 activeFunctionSet {functionSet,allSets} =
   allSets
     |> Dict.get (FunctionSet.asKey functionSet)
     |> Maybe.withDefault Dict.empty
 
+activeGameNumber : { a | functionSet : FunctionSet, gameNumber : Dict String number } -> number
 activeGameNumber {functionSet,gameNumber} =
   gameNumber
     |> Dict.get (FunctionSet.asKey functionSet)
     |> Maybe.withDefault 1
 
+activeGuesses : { a | functionSet : FunctionSet, guesses : Dict String (List Function) } -> List Function
 activeGuesses {functionSet,guesses} =
   guesses
     |> Dict.get (FunctionSet.asKey functionSet)
@@ -480,6 +487,7 @@ display sig =
 
 
 
+viewGuess : Function -> Function -> Html msg
 viewGuess answer guess =
   div [A.class "guess"]
     [ div [A.class "function"]
