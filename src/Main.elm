@@ -3,7 +3,6 @@ port module Main exposing (..)
 import Url as Url
 import Url.Builder as Url
 import Random as Random
-import Task as Task
 import Time as Time
 import Dict exposing (Dict)
 import Dict as Dict
@@ -19,6 +18,7 @@ import Result.Extra exposing (combineMap)
 import Json.Decode as Decode
 import Json.Encode as Encode
 import FunctionSet exposing (FunctionSet (..), functionSetEncoder, functionSetDecoder, mkFunctionUrl, displayName)
+import Json.Decode exposing (Value)
 
 port persistState : Encode.Value -> Cmd msg
 
@@ -33,6 +33,7 @@ type alias PersistedState =
   , initialSeed : Int
   , gameNumber : Dict String Int
   , functionSet : FunctionSet
+  , mastodonInstance : Maybe String
   }
 
 type Msg = Input String
@@ -40,6 +41,9 @@ type Msg = Input String
          | NextGame
          | ChangeSet String
          | DisplayChangeSetPicker
+         | DisplayInstancePicker
+         | SetInstance String
+         | CloseInstancePicker
 
 type TypeElem
   = Literal String
@@ -65,6 +69,8 @@ type alias GameState =
   , error : Maybe String
   , functionSet : FunctionSet
   , showFunctionSetPicker : Bool
+  , mastodonInstance : Maybe String
+  , showMastodonInstancePicker : Bool
   }
 
 type Model =
@@ -77,6 +83,7 @@ orElse m1 m2 = case (m1, m2) of
   (_, Nothing) -> m1
   
 
+main : Program Value Model Msg
 main =
          Browser.element
            { init = init
@@ -88,7 +95,7 @@ main =
 init : Encode.Value -> (Model, Cmd Msg)
 init initFlags =
   case Decode.decodeValue flagsDecoder initFlags of
-    Err e -> (FunctionsError, Cmd.none)
+    Err _ -> (FunctionsError, Cmd.none)
     Ok ({initialSeed, initialState, initialSet}) ->
         ( case results of
             Err _ -> FunctionsError
@@ -121,18 +128,20 @@ persistedStateDecoder =
                    |> Decode.map (Dict.singleton (FunctionSet.asKey HaskellPrelude))
                ]
    in
-      Decode.map4 PersistedState
+      Decode.map5 PersistedState
         (Decode.field "guesses" gs)
         (Decode.field "initialSeed" Decode.int)
         (Decode.field "gameNumber" gn)
         fset
+        (Decode.field "mastodonInstance" (Decode.maybe Decode.string))
 
 persistedStateEncoder : PersistedState -> Encode.Value
-persistedStateEncoder { guesses, initialSeed, gameNumber, functionSet } =
+persistedStateEncoder { guesses, initialSeed, gameNumber, functionSet, mastodonInstance } =
   Encode.object [ ("guesses", Encode.dict identity (Encode.list functionEncoder) guesses)
                 , ("initialSeed", Encode.int initialSeed)
                 , ("gameNumber", Encode.dict identity Encode.int gameNumber)
                 , ("functionSet", functionSetEncoder functionSet)
+                , ("mastodonInstance", (Maybe.withDefault Encode.null (Maybe.map Encode.string mastodonInstance)))
                 ]
 
 functionDecoder : Decode.Decoder Function
@@ -141,6 +150,7 @@ functionDecoder =
     (Decode.field "name" Decode.string)
     (Decode.field "signature" (Decode.list typeElemDecoder))
 
+functionEncoder : Function -> Value
 functionEncoder {name, signature} =
   Encode.object [ ("name", Encode.string name)
                 , ("signature", Encode.list typeElemEncoder signature)
@@ -160,6 +170,7 @@ typeElemDecoder =
           _       -> Decode.fail ("Unknown kind " ++ kind ++ " not in (lit,ident)")
       )
 
+typeElemEncoder : TypeElem -> Value
 typeElemEncoder elem =
   case elem of
     Literal value -> Encode.object [ ("kind", Encode.string "lit")
@@ -193,6 +204,8 @@ computeState allSets initialSeed mState mFs =
                                        , error = Nothing
                                        , functionSet = defaultSet
                                        , showFunctionSetPicker = False
+                                       , showMastodonInstancePicker = False
+                                       , mastodonInstance = Nothing
                                        }
    in
       case mState of
@@ -224,6 +237,8 @@ computeState allSets initialSeed mState mFs =
                                , error = Nothing
                                , functionSet = persisted.functionSet
                                , showFunctionSetPicker = False
+                               , showMastodonInstancePicker = False
+                               , mastodonInstance = persisted.mastodonInstance
                                }
 
 computeKnownIdentsFromScratch : Function -> List Function -> (Set String, Set Char)
@@ -246,16 +261,19 @@ computeKnownIdents answer guess (knownIdents, knownChars) =
    in
       (newIdents, newChars)
 
+activeFunctionSet : { a | functionSet : FunctionSet, allSets : Dict String (Dict k v) } -> Dict k v
 activeFunctionSet {functionSet,allSets} =
   allSets
     |> Dict.get (FunctionSet.asKey functionSet)
     |> Maybe.withDefault Dict.empty
 
+activeGameNumber : { a | functionSet : FunctionSet, gameNumber : Dict String number } -> number
 activeGameNumber {functionSet,gameNumber} =
   gameNumber
     |> Dict.get (FunctionSet.asKey functionSet)
     |> Maybe.withDefault 1
 
+activeGuesses : { a | functionSet : FunctionSet, guesses : Dict String (List Function) } -> List Function
 activeGuesses {functionSet,guesses} =
   guesses
     |> Dict.get (FunctionSet.asKey functionSet)
@@ -335,17 +353,26 @@ update msg model =
                                        , error = Nothing
                                        , functionSet = state.functionSet
                                        , showFunctionSetPicker = False
+                                       , showMastodonInstancePicker = False
+                                       , mastodonInstance = state.mastodonInstance
                                        }
+    (Loaded state, DisplayInstancePicker) ->
+       (Loaded { state | showMastodonInstancePicker = True}, Cmd.none)
+    (Loaded state, CloseInstancePicker) ->
+       persist { state | showMastodonInstancePicker = False }
+    (Loaded state, SetInstance mi) ->
+       (Loaded { state | mastodonInstance = Just mi}, Cmd.none)
 
 persist : GameState -> (Model, Cmd Msg)
 persist state =
   let
-      { guesses, knownIdents, initialSeed, gameNumber } = state
+      { guesses, initialSeed, gameNumber } = state
       toPersist = persistedStateEncoder
                     { guesses = guesses
                     , initialSeed = initialSeed
                     , gameNumber = gameNumber
                     , functionSet = state.functionSet
+                    , mastodonInstance = state.mastodonInstance
                     }
    in
       (Loaded state, persistState toPersist)
@@ -460,6 +487,7 @@ display sig =
 
 
 
+viewGuess : Function -> Function -> Html msg
 viewGuess answer guess =
   div [A.class "guess"]
     [ div [A.class "function"]
@@ -570,15 +598,37 @@ gameIsOver isWon state =
                    , a [A.href (mkFunctionUrl state.functionSet state.answer.name)] [text "view definition"]
                    ]
       guesses = viewGuesses state
-      shareButton = a [A.href (twitterUrl state), A.class "share-link"]
-                      [text "Share on twitter"]
       nextGame = div [A.class "next-game"]
                      [ button [onClick NextGame] [text "Try another one"]
                      ]
    in
       if isWon
-      then div [] [answer, guesses, shareButton, nextGame]
+      then div [] [answer, guesses, shareButton state, nextGame]
       else div [] [answer, guesses, nextGame]
+
+shareButton : GameState -> Html Msg
+shareButton state =
+  let
+      {mastodonInstance, showMastodonInstancePicker} = state
+      instancePicker =
+        let
+            value = Maybe.withDefault "mastodon.social" mastodonInstance
+         in
+            form [onSubmit CloseInstancePicker, A.class "share-link"]
+                 [ input [A.type_ "text", A.value value, onInput SetInstance] []
+                 ]
+      shareLink mi = a [ A.href (mastodonUrl state mi) , A.class "share-link"]
+                       [text "Share on mastodon"]
+      openInstancePicker =
+        div [A.class "share-link"]
+            [ button [onClick DisplayInstancePicker] [text "Choose mastodon instance"]
+            ]
+   in
+      if showMastodonInstancePicker
+      then instancePicker
+      else case mastodonInstance of
+             Just mi -> shareLink mi
+             Nothing -> openInstancePicker
 
 gameIsWon : GameState -> Html Msg
 gameIsWon = gameIsOver True
@@ -591,10 +641,17 @@ twitterUrl state =
   Url.crossOrigin
     "https://twitter.com"
     ["intent", "tweet"]
-    [Url.string "text" (twitterMessage state)]
+    [Url.string "text" (socialMediaMessage state)]
 
-twitterMessage : GameState -> String
-twitterMessage state = String.join " "
+mastodonUrl : GameState -> String -> String
+mastodonUrl state domain =
+  Url.crossOrigin
+    ("https://" ++ domain)
+    ["share"]
+    [Url.string "text" (socialMediaMessage state)]
+
+socialMediaMessage : GameState -> String
+socialMediaMessage state = String.join " "
   [ "I've found today's https://haskle.net"
   , FunctionSet.asKey state.functionSet ++ "#" ++ String.fromInt (activeGameNumber state)
   , "function after"
