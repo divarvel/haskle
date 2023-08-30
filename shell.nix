@@ -3,5 +3,6 @@
 mkShell {
   buildInputs = [
     elmPackages.elm
+    elmPackages.elm-language-server
   ];
 }
